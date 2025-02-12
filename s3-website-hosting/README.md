@@ -131,7 +131,7 @@ aws s3 cp index.html "s3://${BUCKET_NAME}/index.html" \
 
 Your website will be available at:
 ```
-http://${BUCKET_NAME}.s3-website-us-east-1.amazonaws.com
+echo http://${BUCKET_NAME}.s3-website-us-east-1.amazonaws.com
 ```
 
 Replace `${BUCKET_NAME}` with your actual bucket name.
