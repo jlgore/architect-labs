@@ -87,7 +87,15 @@ aws s3api put-bucket-website \
 
 ### 4. Configure Public Access
 
-Create and apply a bucket policy to allow public read access:
+First, disable the S3 Block Public Access settings for your bucket:
+
+```bash
+aws s3api put-public-access-block \
+    --bucket "$BUCKET_NAME" \
+    --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+```
+
+Then create and apply a bucket policy to allow public read access:
 
 ```bash
 cat << EOF > bucket-policy.json
@@ -161,6 +169,8 @@ rm index.html bucket-policy.json
    - Verify your AWS CLI credentials are configured correctly
    - Ensure you have the necessary IAM permissions
    - Check if bucket policies are properly configured
+   - Verify S3 Block Public Access settings are disabled for the bucket
+   - If you get "BlockPublicPolicy" errors, ensure you've run the put-public-access-block command
 
 ## Extended Learning
 
