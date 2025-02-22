@@ -175,27 +175,74 @@ aws s3api get-bucket-lifecycle-configuration \
 
 ### 8. Test Object Versioning Operations
 
-Let's explore some common operations with versioned objects:
-
-#### Retrieve a specific version of an object:
+First, let's capture the version IDs into variables using jq:
 
 ```bash
-# Replace VERSION_ID with an actual version ID from the list-object-versions command
+# Get all versions and store them in variables from newest to oldest
+VERSIONS=$(aws s3api list-object-versions \
+    --bucket $BUCKET_NAME \
+    --prefix test-file.txt \
+    --query 'Versions[?!DeleteMarker]' \
+    --output json)
+
+VERSION_3=$(echo $VERSIONS | jq -r '.[] | select(.IsLatest == true) | .VersionId')
+VERSION_2=$(echo $VERSIONS | jq -r '.[] | select(.IsLatest == false) | .VersionId' | head -n 1)
+VERSION_1=$(echo $VERSIONS | jq -r '.[] | select(.IsLatest == false) | .VersionId' | tail -n 1)
+
+# Print captured version IDs for verification
+echo "Version 1 ID: $VERSION_1"
+echo "Version 2 ID: $VERSION_2"
+echo "Version 3 ID: $VERSION_3 (Latest)"
+
+#### Retrieve specific versions of the object:
+
+```bash
+# Retrieve version 1
 aws s3api get-object \
     --bucket $BUCKET_NAME \
     --key test-file.txt \
-    --version-id VERSION_ID \
+    --version-id $VERSION_1 \
     --output-file test-file-v1.txt
+
+# Retrieve version 2
+aws s3api get-object \
+    --bucket $BUCKET_NAME \
+    --key test-file.txt \
+    --version-id $VERSION_2 \
+    --output-file test-file-v2.txt
+
+# Retrieve version 3 (latest)
+aws s3api get-object \
+    --bucket $BUCKET_NAME \
+    --key test-file.txt \
+    --version-id $VERSION_3 \
+    --output-file test-file-v3.txt
 ```
+
+#### Compare the contents of different versions:
+
+```bash
+echo "Contents of version 1:"
+cat test-file-v1.txt
+echo -e "\nContents of version 2:"
+cat test-file-v2.txt
+echo -e "\nContents of version 3 (latest):"
+cat test-file-v3.txt
 
 #### Delete a specific version of an object:
 
 ```bash
-# Replace VERSION_ID with an actual version ID
+# Delete version 2 as an example
 aws s3api delete-object \
     --bucket $BUCKET_NAME \
     --key test-file.txt \
-    --version-id VERSION_ID
+    --version-id $VERSION_2
+
+# Verify deletion by listing remaining versions
+aws s3api list-object-versions \
+    --bucket $BUCKET_NAME \
+    --prefix test-file.txt \
+    --query 'Versions[?!DeleteMarker]'
 ```
 
 #### Create a delete marker (standard delete on a versioned object):
