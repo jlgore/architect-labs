@@ -202,21 +202,21 @@ aws s3api get-object \
     --bucket $BUCKET_NAME \
     --key test-file.txt \
     --version-id $VERSION_1 \
-    --output-file test-file-v1.txt
+    test-file-v1.txt
 
 # Retrieve version 2
 aws s3api get-object \
     --bucket $BUCKET_NAME \
     --key test-file.txt \
     --version-id $VERSION_2 \
-    --output-file test-file-v2.txt
+    test-file-v2.txt
 
 # Retrieve version 3 (latest)
 aws s3api get-object \
     --bucket $BUCKET_NAME \
     --key test-file.txt \
     --version-id $VERSION_3 \
-    --output-file test-file-v3.txt
+    test-file-v3.txt
 ```
 
 #### Compare the contents of different versions:
