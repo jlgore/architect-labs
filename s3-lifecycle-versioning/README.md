@@ -15,12 +15,23 @@ This lab guides you through setting up S3 bucket versioning and lifecycle polici
 First, let's create a new S3 bucket for our lab:
 
 ```bash
+# Set your bucket name as a variable
+BUCKET_NAME="your-unique-bucket-name-$(date +%Y%m%d%H%M%S)"
+
 aws s3api create-bucket \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --region us-east-1
 ```
 
-> **Note**: Replace `your-unique-bucket-name` with a globally unique bucket name. For regions other than `us-east-1`, you'll need to specify the `--create-bucket-configuration LocationConstraint=region-name` parameter.
+> **Note**: Replace `your-unique-bucket-name` with a globally unique bucket name. For regions other than `us-east-1`, you'll need to specify the `--create-bucket-configuration LocationConstraint=region-name` parameter:
+
+```bash
+# For regions other than us-east-1
+aws s3api create-bucket \
+    --bucket $BUCKET_NAME \
+    --region your-region \
+    --create-bucket-configuration LocationConstraint=your-region
+```
 
 ### 2. Enable Versioning on the Bucket
 
@@ -28,7 +39,7 @@ Versioning allows you to preserve, retrieve, and restore every version of object
 
 ```bash
 aws s3api put-bucket-versioning \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --versioning-configuration Status=Enabled
 ```
 
@@ -46,7 +57,7 @@ EOF
 
 # Upload the file
 aws s3api put-object \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --key test-file.txt \
     --body test-file.txt
 ```
@@ -62,7 +73,7 @@ EOF
 
 # Upload the updated file (creates a new version)
 aws s3api put-object \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --key test-file.txt \
     --body test-file.txt
 ```
@@ -79,7 +90,7 @@ EOF
 
 # Upload the updated file (creates a new version)
 aws s3api put-object \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --key test-file.txt \
     --body test-file.txt
 ```
@@ -90,7 +101,7 @@ Now you can verify that all versions of the file have been stored:
 
 ```bash
 aws s3api list-object-versions \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --prefix test-file.txt
 ```
 
@@ -149,7 +160,7 @@ Now, apply this lifecycle policy to your bucket:
 
 ```bash
 aws s3api put-bucket-lifecycle-configuration \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --lifecycle-configuration file://lifecycle-policy.json
 ```
 
@@ -159,7 +170,7 @@ Verify that the lifecycle policy has been correctly applied:
 
 ```bash
 aws s3api get-bucket-lifecycle-configuration \
-    --bucket your-unique-bucket-name
+    --bucket $BUCKET_NAME
 ```
 
 ### 8. Test Object Versioning Operations
@@ -171,7 +182,7 @@ Let's explore some common operations with versioned objects:
 ```bash
 # Replace VERSION_ID with an actual version ID from the list-object-versions command
 aws s3api get-object \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --key test-file.txt \
     --version-id VERSION_ID \
     --output-file test-file-v1.txt
@@ -182,7 +193,7 @@ aws s3api get-object \
 ```bash
 # Replace VERSION_ID with an actual version ID
 aws s3api delete-object \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --key test-file.txt \
     --version-id VERSION_ID
 ```
@@ -191,7 +202,7 @@ aws s3api delete-object \
 
 ```bash
 aws s3api delete-object \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --key test-file.txt
 ```
 
@@ -201,7 +212,7 @@ This doesn't actually delete the object but creates a delete marker, which is a 
 
 ```bash
 aws s3api list-object-versions \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --prefix test-file.txt \
     --delete-markers
 ```
@@ -223,7 +234,7 @@ EOF
 
 # Upload the document to the documents/ prefix
 aws s3api put-object \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --key documents/report.txt \
     --body documents/report.txt
 ```
@@ -237,7 +248,7 @@ If you want to clean up after completing the lab:
 ```bash
 # First, list all versions
 aws s3api list-object-versions \
-    --bucket your-unique-bucket-name \
+    --bucket $BUCKET_NAME \
     --output json > versions.json
 
 # Use a script to extract version IDs and delete all objects
@@ -248,13 +259,13 @@ with open("versions.json", "r") as f:
     
 for version in data.get("Versions", []):
     print(f"Deleting {version["Key"]} version {version["VersionId"]}...")
-    cmd = f"aws s3api delete-object --bucket your-unique-bucket-name --key {version["Key"]} --version-id {version["VersionId"]}"
+    cmd = f"aws s3api delete-object --bucket $BUCKET_NAME --key {version["Key"]} --version-id {version["VersionId"]}"
     import os
     os.system(cmd)
 
 for marker in data.get("DeleteMarkers", []):
     print(f"Deleting marker for {marker["Key"]} version {marker["VersionId"]}...")
-    cmd = f"aws s3api delete-object --bucket your-unique-bucket-name --key {marker["Key"]} --version-id {marker["VersionId"]}"
+    cmd = f"aws s3api delete-object --bucket $BUCKET_NAME --key {marker["Key"]} --version-id {marker["VersionId"]}"
     import os
     os.system(cmd)
 '
@@ -264,7 +275,7 @@ for marker in data.get("DeleteMarkers", []):
 
 ```bash
 aws s3api delete-bucket \
-    --bucket your-unique-bucket-name
+    --bucket $BUCKET_NAME
 ```
 
 ## Explanation of Key Concepts
