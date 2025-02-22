@@ -258,10 +258,11 @@ This doesn't actually delete the object but creates a delete marker, which is a 
 #### List all delete markers:
 
 ```bash
+# List delete markers using query
 aws s3api list-object-versions \
     --bucket $BUCKET_NAME \
     --prefix test-file.txt \
-    --delete-markers
+    --query 'DeleteMarkers[]'
 ```
 
 ### 9. Upload Files to Test the Lifecycle Policy
