@@ -5,43 +5,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Variables
-variable "aws_region" {
-  description = "AWS region to deploy resources"
-  type        = string
-  default     = "us-east-1"
-}
-
-variable "project_name" {
-  description = "Project name to be used for resource naming"
-  type        = string
-  default     = "EFSLab"
-}
-
-variable "vpc_cidr" {
-  description = "CIDR block for VPC"
-  type        = string
-  default     = "10.0.0.0/16"
-}
-
-variable "public_subnet_cidr" {
-  description = "CIDR block for public subnet"
-  type        = string
-  default     = "10.0.1.0/24"
-}
-
-variable "private_subnet_cidr" {
-  description = "CIDR block for private subnet"
-  type        = string
-  default     = "10.0.2.0/24"
-}
-
-variable "ec2_instance_type" {
-  description = "EC2 instance type"
-  type        = string
-  default     = "t2.micro"
-}
-
 # Create a unique identifier to avoid name conflicts
 resource "random_id" "unique_id" {
   byte_length = 4
@@ -221,8 +184,7 @@ data "aws_ami" "amazon_linux_2" {
 # Key Pair
 resource "aws_key_pair" "ssh_key" {
   key_name   = "ec2-efs-lab-key-${random_id.unique_id.hex}"
-  public_key = file("${path.module}/id_rsa.pub")
-
+  public_key = file(var.ssh_public_key_path)
   # Note: You need to generate an SSH key pair first and place the public key in the module directory
   # You can use: ssh-keygen -t rsa -b 2048 -f id_rsa -N ""
 }
@@ -272,48 +234,3 @@ resource "aws_instance" "efs_client" {
   }
 }
 
-# Outputs
-output "vpc_id" {
-  description = "ID of the VPC"
-  value       = aws_vpc.main.id
-}
-
-output "public_subnet_id" {
-  description = "ID of the public subnet"
-  value       = aws_subnet.public.id
-}
-
-output "private_subnet_id" {
-  description = "ID of the private subnet"
-  value       = aws_subnet.private.id
-}
-
-output "ec2_sg_id" {
-  description = "ID of the EC2 security group"
-  value       = aws_security_group.ec2_sg.id
-}
-
-output "efs_sg_id" {
-  description = "ID of the EFS security group"
-  value       = aws_security_group.efs_sg.id
-}
-
-output "efs_id" {
-  description = "ID of the EFS file system"
-  value       = aws_efs_file_system.main.id
-}
-
-output "efs_dns_name" {
-  description = "DNS name of the EFS file system"
-  value       = aws_efs_file_system.main.dns_name
-}
-
-output "ec2_instance_id" {
-  description = "ID of the EC2 instance"
-  value       = aws_instance.efs_client.id
-}
-
-output "ec2_public_ip" {
-  description = "Public IP of the EC2 instance"
-  value       = aws_instance.efs_client.public_ip
-}
