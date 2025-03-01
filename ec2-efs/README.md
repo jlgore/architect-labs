@@ -230,7 +230,6 @@ aws ec2 authorize-security-group-ingress \
   --port 2049 \
   --source-group "$EC2_SG_ID"
 
-echo "Added NFS ingress rule to EFS security group"
 ```
 
 ## PART 3: Creating an EFS Filesystem
@@ -238,12 +237,11 @@ echo "Added NFS ingress rule to EFS security group"
 ### Create the EFS filesystem
 
 ```bash
-# Create EFS filesystem
+# Create EFS filesystem without tags
 EFS_ID=$(aws efs create-file-system \
   --performance-mode generalPurpose \
   --throughput-mode bursting \
   --encrypted \
-  --tags Key=Name,Value="EFSLab-$UNIQUE_ID" \
   --query "FileSystemId" \
   --output text)
 
