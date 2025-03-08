@@ -79,7 +79,7 @@ First, let's install PostgreSQL client and create our database:
 
 ```bash
 # Install the PostgreSQL client if not already available in CloudShell
-sudo yum install -y postgresql
+sudo yum install -y postgresql15
 
 # Set your endpoint (replace with your actual endpoint from previous step)
 ENDPOINT=$(aws rds describe-db-instances \
