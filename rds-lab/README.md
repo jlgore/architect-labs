@@ -88,7 +88,8 @@ ENDPOINT=$(aws rds describe-db-instances \
     --output text)
 
 # Create a database
-PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -c "CREATE DATABASE $DB_NAME;"
+export PGPASSWORD=$DB_PASSWORD 
+psql -h $ENDPOINT -U $DB_USER -c "CREATE DATABASE $DB_NAME;"
 ```
 
 ## Step 5: Download and Import Sample Data
