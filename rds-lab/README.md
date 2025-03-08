@@ -32,7 +32,7 @@ Let's create a simple PostgreSQL database. We'll use the most basic configuratio
 # Set variables for your database (you can modify these values)
 DB_NAME="studentdb"
 DB_INSTANCE="student-postgres"
-DB_USER="rdsadmin"
+DB_USER="studentadmin"
 DB_PASSWORD="ChangeMe123!"  # Remember to use a secure password in real scenarios
 
 # Create RDS instance
