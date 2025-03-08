@@ -101,9 +101,10 @@ Now let's download and import sample data files:
 mkdir -p ~/rds-lab-data
 
 # Download student data
-curl -s https://raw.githubusercontent.com/sample-data/students.sql -o ~/rds-lab-data/students.sql
-curl -s https://raw.githubusercontent.com/sample-data/courses.sql -o ~/rds-lab-data/courses.sql
-curl -s https://raw.githubusercontent.com/sample-data/enrollments.sql -o ~/rds-lab-data/enrollments.sql
+curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/courses.sql -o ~/rds-lab-data/students.sql
+
+curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/enrollments.sql -o ~/rds-lab-data/courses.sql
+curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/students.sql -o ~/rds-lab-data/enrollments.sql
 
 # Note: The URLs above are placeholders. We'll create these files in the next steps.
 
