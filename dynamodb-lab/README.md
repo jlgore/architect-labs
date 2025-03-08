@@ -250,11 +250,7 @@ aws dynamodb update-table \
                 "KeySchema": [
                     {"AttributeName": "Email", "KeyType": "HASH"}
                 ],
-                "Projection": {"ProjectionType": "ALL"},
-                "ProvisionedThroughput": {
-                    "ReadCapacityUnits": 5,
-                    "WriteCapacityUnits": 5
-                }
+                "Projection": {"ProjectionType": "ALL"}
             }
         }
     ]'
@@ -267,6 +263,7 @@ aws dynamodb update-table \
 - The GSI will be automatically kept in sync with the main table
 - This index creation can take some time to complete on large tables
 - After creation, it allows efficient queries by Email (which wasn't possible before)
+- Since we're using PAY_PER_REQUEST billing mode, we don't specify ReadCapacityUnits or WriteCapacityUnits
 
 Query the GSI:
 
