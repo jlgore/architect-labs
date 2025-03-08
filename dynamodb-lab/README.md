@@ -124,6 +124,13 @@ aws dynamodb put-item \
 aws dynamodb scan --table-name Students
 ```
 
+**What happens during a scan operation?**
+- A scan operation examines every item in the table
+- It returns all attributes for each item by default
+- Scans are resource-intensive and should be used sparingly on large tables
+- This operation will retrieve all student records in our table
+- For production applications, you should avoid frequent scans on large tables
+
 ### Query for a specific student:
 
 ```bash
@@ -132,6 +139,13 @@ aws dynamodb query \
     --key-condition-expression "StudentID = :sid" \
     --expression-attribute-values '{":sid": {"S": "S1001"}}'
 ```
+
+**What happens during this query operation?**
+- This query uses only the partition key (StudentID)
+- It efficiently retrieves all items with StudentID = "S1001"
+- DynamoDB will return all courses for student S1001
+- The operation is much more efficient than a scan because it only looks at items with the specified partition key
+- Results will include all attributes for matching items by default
 
 ### Query for a specific student in a specific course:
 
@@ -144,6 +158,14 @@ aws dynamodb query \
         ":cid": {"S": "CS101"}
     }'
 ```
+
+**What happens during this query operation?**
+- This query uses both the partition key (StudentID) and sort key (CourseID)
+- It precisely locates a single item in the table
+- DynamoDB first finds all items with the partition key S1001
+- Then it filters those results to only include the item with CourseID = CS101
+- This is the most efficient query type as it narrows to exactly one item
+- The result will include John Smith's information for CS101 course
 
 ## Step 5: Update and Delete Items
 
@@ -189,6 +211,14 @@ aws dynamodb scan \
     --expression-attribute-values '{":g": {"N": "85"}}'
 ```
 
+**What happens during a filtered scan operation?**
+- This operation first performs a complete table scan (reads every item)
+- Then DynamoDB applies the filter expression to the results
+- Only items with Grade > 85 will be returned to you
+- Important note: You are still charged for the full table scan, even though you only receive filtered results
+- This is less efficient than queries because filtering happens after reading all data
+- In this example, we'll get all students who scored above 85 in any course
+
 Find all students in the Fall 2023 semester:
 
 ```bash
@@ -197,6 +227,13 @@ aws dynamodb scan \
     --filter-expression "Semester = :sem" \
     --expression-attribute-values '{":sem": {"S": "Fall2023"}}'
 ```
+
+**What happens in this operation?**
+- Like the previous example, DynamoDB scans the entire table first
+- Then it filters to only return items where Semester = "Fall2023"
+- The operation reads all items but only returns matching ones
+- This will return all student enrollments from the Fall 2023 semester
+- For large tables, using a Global Secondary Index would be more efficient if you frequently query by semester
 
 ## Step 7: Create a Secondary Index
 
@@ -223,6 +260,14 @@ aws dynamodb update-table \
     ]'
 ```
 
+**What happens when creating a GSI?**
+- This operation adds a new access pattern to our table
+- DynamoDB will create a separate index with Email as the partition key
+- "ProjectionType": "ALL" means all attributes from the base table will be copied to the index
+- The GSI will be automatically kept in sync with the main table
+- This index creation can take some time to complete on large tables
+- After creation, it allows efficient queries by Email (which wasn't possible before)
+
 Query the GSI:
 
 ```bash
@@ -232,6 +277,14 @@ aws dynamodb query \
     --key-condition-expression "Email = :e" \
     --expression-attribute-values '{":e": {"S": "jane.doe@example.com"}}'
 ```
+
+**What happens during a GSI query?**
+- This operation directly queries the EmailIndex (not the main table)
+- It efficiently finds all items where Email = "jane.doe@example.com"
+- DynamoDB will return all courses Jane Doe is enrolled in
+- This is much more efficient than scanning and filtering by Email
+- The query only examines items with the matching Email
+- In our example, it will return two records (CS101 and PHYS101 for Jane)
 
 ## Step 8: Clean Up Resources
 
