@@ -1,16 +1,15 @@
 #!/bin/bash
 
-echo "=========================================================="
-echo "DYNAMODB DATA VISUALIZATION"
-echo "=========================================================="
-echo ""
-echo "What this script does:"
-echo "1. Export DynamoDB data to CSV format for visualization"
-echo "2. Create a simple ASCII bar chart using gnuplot"
-echo "3. This demonstrates how to transform NoSQL data for analysis"
-echo ""
-echo "Starting data export and visualization..."
-echo ""
+# ==========================================================
+# DYNAMODB DATA VISUALIZATION
+# ==========================================================
+
+# What this script does:
+# 1. Export DynamoDB data to CSV format for visualization
+# 2. Create a simple ASCII bar chart using gnuplot
+# 3. This demonstrates how to transform NoSQL data for analysis
+
+# Starting data export and visualization...
 
 # Check if jq is installed
 if ! command -v jq &> /dev/null; then
@@ -18,13 +17,11 @@ if ! command -v jq &> /dev/null; then
     sudo yum install -y jq
 fi
 
-echo "Step 1: Exporting DynamoDB data to CSV..."
+# Step 1: Exporting DynamoDB data to CSV...
 aws dynamodb scan --table-name Students --output json | \
     jq -r '.Items[] | [.StudentID.S, .CourseID.S, .Grade.N] | @csv' > students.csv
 
-echo ""
-echo "Data exported to students.csv"
-echo ""
+# Data exported to students.csv
 
 # Check if gnuplot is installed
 if ! command -v gnuplot &> /dev/null; then
@@ -32,8 +29,7 @@ if ! command -v gnuplot &> /dev/null; then
     sudo yum install -y gnuplot
 fi
 
-echo "Step 2: Creating a simple bar chart of student grades..."
-echo ""
+# Step 2: Creating a simple bar chart of student grades...
 
 # Create a gnuplot script
 cat > plot.gnu << EOL
@@ -47,10 +43,9 @@ EOL
 # Run gnuplot
 gnuplot plot.gnu
 
-echo ""
-echo "Visualization complete. This is a simple ASCII chart of grades."
-echo "In a real application, you might use more sophisticated visualization tools."
-echo "=========================================================="
+# Visualization complete. This is a simple ASCII chart of grades.
+# In a real application, you might use more sophisticated visualization tools.
+# ==========================================================
 
 # Clean up
 rm plot.gnu

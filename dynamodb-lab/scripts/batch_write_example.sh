@@ -1,18 +1,17 @@
 #!/bin/bash
 # batch_write_example.sh
 
-echo "=========================================================="
-echo "BATCH WRITE OPERATIONS IN DYNAMODB"
-echo "=========================================================="
-echo ""
-echo "What this script does:"
-echo "1. Demonstrates how to add multiple items in a single API call"
-echo "2. BatchWriteItem can contain up to 25 put or delete requests"
-echo "3. This is much more efficient than individual put-item calls"
-echo "4. We're adding two new students with a single operation"
-echo ""
-echo "Running the batch write operation now..."
-echo ""
+# ==========================================================
+# BATCH WRITE OPERATIONS IN DYNAMODB
+# ==========================================================
+
+# What this script does:
+# 1. Demonstrates how to add multiple items in a single API call
+# 2. BatchWriteItem can contain up to 25 put or delete requests
+# 3. This is much more efficient than individual put-item calls
+# 4. We're adding two new students with a single operation
+
+# Running the batch write operation now...
 
 aws dynamodb batch-write-item --request-items '{
     "Students": [
@@ -43,6 +42,5 @@ aws dynamodb batch-write-item --request-items '{
     ]
 }'
 
-echo ""
-echo "Batch write operation complete. Two new students have been added."
-echo "=========================================================="
+# Batch write operation complete. Two new students have been added.
+# ==========================================================

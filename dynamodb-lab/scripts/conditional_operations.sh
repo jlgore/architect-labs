@@ -1,18 +1,17 @@
 #!/bin/bash
 # conditional_update.sh
 
-echo "=========================================================="
-echo "CONDITIONAL UPDATE OPERATIONS IN DYNAMODB"
-echo "=========================================================="
-echo ""
-echo "What this script does:"
-echo "1. Demonstrates how to update an item only if a condition is met"
-echo "2. We'll update a student's grade only if it's currently below 90"
-echo "3. This prevents overwriting higher grades accidentally"
-echo "4. The condition-expression parameter enforces this rule"
-echo ""
-echo "Running the conditional update operation now..."
-echo ""
+# ==========================================================
+# CONDITIONAL UPDATE OPERATIONS IN DYNAMODB
+# ==========================================================
+
+# What this script does:
+# 1. Demonstrates how to update an item only if a condition is met
+# 2. We'll update a student's grade only if it's currently below 90
+# 3. This prevents overwriting higher grades accidentally
+# 4. The condition-expression parameter enforces this rule
+
+# Running the conditional update operation now...
 
 aws dynamodb update-item \
     --table-name Students \
@@ -28,7 +27,6 @@ aws dynamodb update-item \
     }' \
     --return-values ALL_NEW
 
-echo ""
-echo "If you see a ConditionalCheckFailedException, it means the condition wasn't met."
-echo "Otherwise, the grade was updated because it was below the threshold."
-echo "=========================================================="
+# If you see a ConditionalCheckFailedException, it means the condition wasn't met.
+# Otherwise, the grade was updated because it was below the threshold.
+# ==========================================================
