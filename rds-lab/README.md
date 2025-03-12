@@ -861,4 +861,122 @@ PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "DROP TABLE
 # Finally drop students
 PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "DROP TABLE IF EXISTS students;"
 
+# Amazon RDS PostgreSQL Guide
+
+This guide provides instructions for connecting to and working with Amazon RDS PostgreSQL instances.
+
+## Connection Information
+
+To connect to your PostgreSQL database instance, you'll need the following information:
+
+- **Endpoint**: Your RDS instance endpoint (e.g., `mydb.cxyz123abc.us-east-1.rds.amazonaws.com`)
+- **Port**: Default PostgreSQL port is 5432
+- **Database name**: Your database name (default is often "postgres")
+- **Username**: Master username you configured when creating the instance
+- **Password**: Master password you configured when creating the instance
+
+## Connecting via Command Line
+
+### Setting Environment Variables
+
+For convenience, you can set environment variables for your connection parameters:
+
+```bash
+export ENDPOINT="your-rds-endpoint.region.rds.amazonaws.com"
+export DB_USER="your_master_username"
+export DB_NAME="your_database_name"
+export DB_PASSWORD="your_password"
+```
+
+### Basic Connection
+
+Connect to your PostgreSQL database using the `psql` command-line client:
+
+```bash
+psql -h $ENDPOINT -U $DB_USER -d $DB_NAME
+```
+
+When prompted, enter your password.
+
+### Connection with Password in Command
+
+If you prefer to include the password in the connection command (not recommended for production):
+
+```bash
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME
+```
+
+### Connection with Additional Options
+
+```bash
+psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -p 5432 -W
+```
+
+The `-W` flag explicitly prompts for a password.
+
+## Common PostgreSQL Commands
+
+Once connected to your PostgreSQL database, you can use these common commands:
+
+```sql
+-- List all databases
+\l
+
+-- Connect to a specific database
+\c database_name
+
+-- List all tables in the current database
+\dt
+
+-- Describe a table structure
+\d table_name
+
+-- Execute a SQL query
+SELECT * FROM table_name LIMIT 10;
+
+-- Create a new table
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert data
+INSERT INTO users (username, email) VALUES ('johndoe', 'john@example.com');
+
+-- Exit the PostgreSQL shell
+\q
+```
+
+## Troubleshooting Connection Issues
+
+If you encounter connection issues:
+
+1. Verify your security group allows inbound traffic on port 5432
+2. Check that your database instance is publicly accessible (if connecting from outside VPC)
+3. Confirm your credentials are correct
+4. Ensure your database instance is in the "Available" state
+
+## Backup and Restore
+
+### Creating a Backup
+
+```bash
+pg_dump -h $ENDPOINT -U $DB_USER -d $DB_NAME > backup.sql
+```
+
+### Restoring from a Backup
+
+```bash
+psql -h $ENDPOINT -U $DB_USER -d $DB_NAME < backup.sql
+```
+
+## Monitoring
+
+Monitor your RDS instance performance through:
+- Amazon RDS Console
+- Amazon CloudWatch
+- PostgreSQL's built-in monitoring: `SELECT * FROM pg_stat_activity;`
+
 
