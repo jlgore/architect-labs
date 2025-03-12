@@ -1,22 +1,25 @@
 # AWS RDS PostgreSQL Lab in CloudShell
 
-This lab will guide you through creating and managing an Amazon RDS PostgreSQL database instance using the AWS CLI within CloudShell. This lab is designed for users with limited permissions (no IAM role creation).
+This lab will guide you through creating and managing an Amazon RDS PostgreSQL database instance using the AWS CLI within CloudShell. You'll create a custom VPC with a public subnet and configure the necessary networking components to make your RDS instance publicly accessible.
 
 ## Prerequisites
 
 - AWS account with access to CloudShell
 - Basic understanding of SQL and databases
-- Permission to create RDS resources
+- Permission to create RDS and VPC resources
 
 ## Lab Overview
 
 In this lab, you will:
 1. Launch AWS CloudShell
-2. Create a PostgreSQL RDS database instance
-3. Connect to your database
-4. Import sample data
-5. Query your data
-6. Clean up resources
+2. Create a custom VPC with a public subnet
+3. Configure networking components (Internet Gateway, Route Tables)
+4. Create a security group for your RDS instance
+5. Create a PostgreSQL RDS database instance
+6. Connect to your database
+7. Import sample data
+8. Query your data
+9. Clean up resources
 
 ## Step 1: Launch AWS CloudShell
 
@@ -24,9 +27,126 @@ In this lab, you will:
 2. Click on the CloudShell icon in the navigation bar (or search for "CloudShell")
 3. Wait for CloudShell to initialize
 
-## Step 2: Create a PostgreSQL RDS Instance
+## Step 2: Create a Custom VPC and Networking Components
 
-Let's create a simple PostgreSQL database. We'll use the most basic configuration to keep things simple.
+Let's set up our networking infrastructure first:
+
+```bash
+# Set variables for your VPC and networking components
+VPC_NAME="rds-lab-vpc"
+VPC_CIDR="10.0.0.0/16"
+SUBNET_NAME="rds-public-subnet"
+SUBNET_CIDR="10.0.1.0/24"
+REGION="us-east-1"  # or whatever region you want to use
+AZ="${REGION}a"
+
+# Create a VPC
+VPC_ID=$(aws ec2 create-vpc \
+    --cidr-block $VPC_CIDR \
+    --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=$VPC_NAME}]" \
+    --query 'Vpc.VpcId' \
+    --output text)
+echo "VPC created with ID: $VPC_ID"
+
+# Enable DNS hostnames for the VPC
+aws ec2 modify-vpc-attribute \
+    --vpc-id $VPC_ID \
+    --enable-dns-hostnames
+
+# Create a public subnet
+SUBNET_ID=$(aws ec2 create-subnet \
+    --vpc-id $VPC_ID \
+    --cidr-block $SUBNET_CIDR \
+    --availability-zone $AZ \
+    --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=$SUBNET_NAME}]" \
+    --query 'Subnet.SubnetId' \
+    --output text)
+echo "Subnet created with ID: $SUBNET_ID"
+
+# Create an Internet Gateway
+IGW_ID=$(aws ec2 create-internet-gateway \
+    --tag-specifications "ResourceType=internet-gateway,Tags=[{Key=Name,Value=rds-lab-igw}]" \
+    --query 'InternetGateway.InternetGatewayId' \
+    --output text)
+echo "Internet Gateway created with ID: $IGW_ID"
+
+# Attach the Internet Gateway to the VPC
+aws ec2 attach-internet-gateway \
+    --internet-gateway-id $IGW_ID \
+    --vpc-id $VPC_ID
+
+# Create a custom route table
+ROUTE_TABLE_ID=$(aws ec2 create-route-table \
+    --vpc-id $VPC_ID \
+    --tag-specifications "ResourceType=route-table,Tags=[{Key=Name,Value=rds-lab-rt}]" \
+    --query 'RouteTable.RouteTableId' \
+    --output text)
+echo "Route Table created with ID: $ROUTE_TABLE_ID"
+
+# Create a route to the Internet Gateway
+aws ec2 create-route \
+    --route-table-id $ROUTE_TABLE_ID \
+    --destination-cidr-block 0.0.0.0/0 \
+    --gateway-id $IGW_ID
+
+# Associate the route table with the subnet
+aws ec2 associate-route-table \
+    --route-table-id $ROUTE_TABLE_ID \
+    --subnet-id $SUBNET_ID
+
+# Create a DB subnet group (we need at least 2 subnets in different AZs)
+# Create a second subnet in a different AZ
+SUBNET2_CIDR="10.0.2.0/24"
+AZ2="${REGION}b"  # Use the second availability zone in your region
+
+SUBNET2_ID=$(aws ec2 create-subnet \
+    --vpc-id $VPC_ID \
+    --cidr-block $SUBNET2_CIDR \
+    --availability-zone $AZ2 \
+    --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=rds-public-subnet-2}]" \
+    --query 'Subnet.SubnetId' \
+    --output text)
+echo "Second subnet created with ID: $SUBNET2_ID"
+
+# Associate the route table with the second subnet
+aws ec2 associate-route-table \
+    --route-table-id $ROUTE_TABLE_ID \
+    --subnet-id $SUBNET2_ID
+
+# Create DB subnet group
+aws rds create-db-subnet-group \
+    --db-subnet-group-name rds-lab-subnet-group \
+    --db-subnet-group-description "Subnet group for RDS lab" \
+    --subnet-ids '["'$SUBNET_ID'", "'$SUBNET2_ID'"]'
+```
+
+## Step 3: Create a Security Group for RDS
+
+Now let's create a security group to allow PostgreSQL traffic:
+
+```bash
+# Create a security group for RDS
+SG_ID=$(aws ec2 create-security-group \
+    --group-name rds-lab-sg \
+    --description "Security group for RDS lab" \
+    --vpc-id $VPC_ID \
+    --query 'GroupId' \
+    --output text)
+echo "Security Group created with ID: $SG_ID"
+
+# Allow PostgreSQL traffic (port 5432) from anywhere
+aws ec2 authorize-security-group-ingress \
+    --group-id $SG_ID \
+    --protocol tcp \
+    --port 5432 \
+    --cidr 0.0.0.0/0
+
+# Note: In a production environment, you would restrict this to specific IP addresses
+```
+
+## Step 4: Create a PostgreSQL RDS Instance
+
+Now let's create our PostgreSQL database in the custom VPC:
 
 ```bash
 # Set variables for your database (you can modify these values)
@@ -35,7 +155,7 @@ DB_INSTANCE="student-postgres"
 DB_USER="studentadmin"
 DB_PASSWORD="ChangeMe123!"  # Remember to use a secure password in real scenarios
 
-# Create RDS instance
+# Create RDS instance in the custom VPC
 aws rds create-db-instance \
     --db-instance-identifier $DB_INSTANCE \
     --db-instance-class db.t3.micro \
@@ -44,6 +164,8 @@ aws rds create-db-instance \
     --allocated-storage 20 \
     --master-username $DB_USER \
     --master-user-password $DB_PASSWORD \
+    --db-subnet-group-name rds-lab-subnet-group \
+    --vpc-security-group-ids $SG_ID \
     --publicly-accessible \
     --no-multi-az
 ```
@@ -59,7 +181,7 @@ aws rds describe-db-instances \
 
 Wait until the status shows `"available"` before proceeding.
 
-## Step 3: Get Connection Information
+## Step 5: Get Connection Information
 
 Once your database is available, retrieve the endpoint:
 
@@ -73,7 +195,7 @@ aws rds describe-db-instances \
 
 Save this endpoint value, you'll need it to connect to your database.
 
-## Step 4: Create a Database and Connect
+## Step 6: Create a Database and Connect
 
 First, let's install PostgreSQL client and create our database:
 
@@ -87,12 +209,15 @@ ENDPOINT=$(aws rds describe-db-instances \
     --query 'DBInstances[0].Endpoint.Address' \
     --output text)
 
-# Create a database
-export PGPASSWORD=$DB_PASSWORD 
-psql -h $ENDPOINT -U $DB_USER -c "CREATE DATABASE $DB_NAME;"
+# Create a database - connect to the default postgres database first
+export PGPASSWORD=$DB_PASSWORD
+psql -h $ENDPOINT -U $DB_USER -d postgres -c "CREATE DATABASE $DB_NAME;"
+
+# Now you can connect to your new database
+psql -h $ENDPOINT -U $DB_USER -d $DB_NAME
 ```
 
-## Step 5: Download and Import Sample Data
+## Step 7: Download and Import Sample Data
 
 Now let's download and import sample data files:
 
@@ -100,15 +225,13 @@ Now let's download and import sample data files:
 # Create a directory for our data files
 mkdir -p ~/rds-lab-data
 
-# Download student data
-curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/courses.sql -o ~/rds-lab-data/students.sql
+# Download SQL files (or create them locally as shown below)
+# Note: These URLs should point to the correct files if they exist in your repository
+curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/students.sql -o ~/rds-lab-data/students.sql
+curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/courses.sql -o ~/rds-lab-data/courses.sql
+curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/enrollments.sql -o ~/rds-lab-data/enrollments.sql
 
-curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/enrollments.sql -o ~/rds-lab-data/courses.sql
-curl -s https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/rds-lab/students.sql -o ~/rds-lab-data/enrollments.sql
-
-# Note: The URLs above are placeholders. We'll create these files in the next steps.
-
-# Import the data files
+# Import the data files in the correct order (students, courses, then enrollments)
 PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -f ~/rds-lab-data/students.sql
 PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -f ~/rds-lab-data/courses.sql
 PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -f ~/rds-lab-data/enrollments.sql
@@ -201,7 +324,7 @@ INSERT INTO enrollments (student_id, course_id, enrollment_date, grade) VALUES
 EOF
 ```
 
-## Step 6: Query Your Database
+## Step 8: Query Your Database
 
 Let's run some basic queries to explore our data:
 
@@ -234,7 +357,7 @@ GROUP BY c.course_id, c.course_code, c.course_name
 ORDER BY avg_gpa DESC;"
 ```
 
-## Step 7: More Advanced Queries
+## Step 9: More Advanced Queries
 
 Let's try some more advanced queries using joins:
 
@@ -267,7 +390,103 @@ WHERE rank = 1
 ORDER BY major;"
 ```
 
-## Step 8: Modify Database Configuration
+## Understanding the Queries
+
+Here's a breakdown of some key SQL queries used in this lab:
+
+### Basic SELECT Query
+
+```sql
+SELECT * FROM students;
+```
+
+This is the most basic query:
+- `SELECT` specifies which columns you want to retrieve
+- `*` is a wildcard meaning "all columns"
+- `FROM students` indicates which table to query
+- The semicolon `;` marks the end of the SQL statement
+
+### Aggregation with GROUP BY
+
+```sql
+SELECT major, COUNT(*) AS student_count 
+FROM students 
+GROUP BY major 
+ORDER BY student_count DESC;
+```
+
+This query counts students by major:
+- `SELECT major` selects the major column
+- `COUNT(*)` counts the number of rows in each group
+- `AS student_count` renames the count column to "student_count"
+- `GROUP BY major` groups the results by the major field
+- `ORDER BY student_count DESC` sorts the results in descending order by the count
+
+### CASE Statement for Grade Conversion
+
+```sql
+SELECT c.course_code, c.course_name, AVG(
+    CASE 
+        WHEN e.grade = 'A+' THEN 4.00
+        WHEN e.grade = 'A' THEN 4.00
+        WHEN e.grade = 'A-' THEN 3.67
+        WHEN e.grade = 'B+' THEN 3.33
+        WHEN e.grade = 'B' THEN 3.00
+        WHEN e.grade = 'B-' THEN 2.67
+        ELSE 0
+    END) AS avg_gpa
+FROM courses c
+JOIN enrollments e ON c.course_id = e.course_id
+GROUP BY c.course_id, c.course_code, c.course_name
+ORDER BY avg_gpa DESC;
+```
+
+This query calculates the average GPA for each course:
+- The `CASE` statement works like an if/else statement, converting letter grades to numeric values
+- `AVG()` calculates the average of those numeric values
+- `FROM courses c` uses "c" as an alias for the courses table
+- `JOIN enrollments e ON c.course_id = e.course_id` connects the courses and enrollments tables
+- `GROUP BY` groups the results by course
+- `ORDER BY avg_gpa DESC` sorts by highest average GPA first
+
+### JOINs for Related Data
+
+```sql
+SELECT s.first_name, s.last_name, c.course_code, c.course_name, e.grade
+FROM students s
+JOIN enrollments e ON s.student_id = e.student_id
+JOIN courses c ON e.course_id = c.course_id
+ORDER BY s.last_name, s.first_name, c.course_code;
+```
+
+This query connects data from three tables:
+- `FROM students s` starts with the students table (aliased as "s")
+- `JOIN enrollments e ON s.student_id = e.student_id` connects students to their enrollments
+- `JOIN courses c ON e.course_id = c.course_id` connects enrollments to course information
+- The result shows each student with their enrolled courses and grades
+- `ORDER BY` sorts the results by last name, first name, and course code
+
+### Window Functions with RANK()
+
+```sql
+SELECT major, first_name, last_name, gpa
+FROM (
+    SELECT s.major, s.first_name, s.last_name, s.gpa,
+           RANK() OVER (PARTITION BY s.major ORDER BY s.gpa DESC) as rank
+    FROM students s
+) ranked
+WHERE rank = 1
+ORDER BY major;
+```
+
+This is a more advanced query using window functions:
+- The inner query uses `RANK() OVER (PARTITION BY s.major ORDER BY s.gpa DESC)` to rank students within each major by GPA
+- `PARTITION BY s.major` divides the data into groups by major
+- `ORDER BY s.gpa DESC` ranks students with highest GPA first
+- The outer query filters to only show rank 1 students (the top student in each major)
+- This gives us the student with the highest GPA in each major
+
+## Step 10: Modify Database Configuration
 
 You can modify certain settings of your RDS instance:
 
@@ -284,7 +503,7 @@ aws rds create-db-snapshot \
     --db-instance-identifier $DB_INSTANCE
 ```
 
-## Step 9: Clean Up Resources
+## Step 11: Clean Up Resources
 
 When you're done with the lab, clean up to avoid ongoing charges:
 
@@ -293,6 +512,32 @@ When you're done with the lab, clean up to avoid ongoing charges:
 aws rds delete-db-instance \
     --db-instance-identifier $DB_INSTANCE \
     --skip-final-snapshot
+
+# Wait for the RDS instance to be deleted before deleting other resources
+echo "Waiting for RDS instance to be deleted..."
+aws rds wait db-instance-deleted --db-instance-identifier $DB_INSTANCE
+
+# Delete the security group
+aws ec2 delete-security-group --group-id $SG_ID
+
+# Delete the DB subnet group
+aws rds delete-db-subnet-group --db-subnet-group-name rds-lab-subnet-group
+
+# Detach the internet gateway from the VPC
+aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+
+# Delete the internet gateway
+aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
+
+# Delete the route table
+aws ec2 delete-route-table --route-table-id $ROUTE_TABLE_ID
+
+# Delete the subnets
+aws ec2 delete-subnet --subnet-id $SUBNET_ID
+aws ec2 delete-subnet --subnet-id $SUBNET2_ID
+
+# Delete the VPC
+aws ec2 delete-vpc --vpc-id $VPC_ID
 ```
 
 ## Challenge Activities
@@ -302,6 +547,7 @@ For students who finish early:
 2. Create a function that calculates GPA based on letter grades
 3. Write a query to find courses where the average grade is above B+
 4. Create a report showing department statistics (number of courses, average credits, etc.)
+5. Modify the VPC to include a private subnet and place the RDS instance there, using a NAT Gateway for outbound connectivity
 
 ## Troubleshooting
 
@@ -309,12 +555,25 @@ If you encounter connection issues:
 - Check that your RDS security group allows inbound connections on port 5432 (PostgreSQL default port)
 - Verify you're using the correct endpoint, username, and password
 - Ensure your CloudShell session has network connectivity to the RDS instance
+- Verify that the route table is correctly associated with your subnets
+- Check that the Internet Gateway is properly attached to your VPC
 
 ## Additional Notes
 
 - In a production environment, you would never hardcode passwords in scripts
-- The RDS instance created in this lab is not encrypted and is publicly accessible, which is not recommended for production
+- For production workloads, it's best practice to place RDS instances in private subnets
+- The security group in this lab allows access from any IP (0.0.0.0/0) which is not recommended for production
 - For a real application, consider using parameter groups, option groups, and proper backup strategies
 - PostgreSQL offers many advanced features like stored procedures, triggers, and custom data types that are beyond the scope of this lab
+
+# Connect to your database and drop the tables in the correct order
+# First drop enrollments (which references students and courses)
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "DROP TABLE IF EXISTS enrollments;"
+
+# Then drop courses
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "DROP TABLE IF EXISTS courses;"
+
+# Finally drop students
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "DROP TABLE IF EXISTS students;"
 
 
