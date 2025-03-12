@@ -350,3 +350,104 @@ This table design supports the following access patterns:
 3. GSIs can help with alternate access patterns
 4. Avoid scanning the entire table in production applications
 5. Use specific queries whenever possible
+
+# University Registration System with DynamoDB
+
+Welcome to Cloudville University's new registration system! As the newly hired database administrator, your task is to implement a student registration system using Amazon DynamoDB. This system will track students, courses, grades, and help the university make data-driven decisions.
+
+## Challenge Exercises
+
+### Challenge 1: Find At-Risk Students
+Create a query to identify all students with grades below 80 who might need academic support.
+
+<details>
+  <summary>Need help? Click for solution script</summary>
+  
+  Solution script: [at_risk_students.sh](scripts/at_risk_students.sh)
+</details>
+
+### Challenge 2: Course Popularity Analysis
+Determine which course has the most students enrolled.
+
+<details>
+  <summary>Need help? Click for solution script</summary>
+  
+  Solution script: [course_popularity.sh](scripts/course_popularity.sh)
+</details>
+
+### Challenge 3: Semester Transition
+Write a script to update all "Fall2023" semester entries to "Completed" status.
+
+<details>
+  <summary>Need help? Click for solution script</summary>
+  
+  Solution script: [semester_transition.sh](scripts/semester_transition.sh)
+</details>
+
+## Visualizing Your DynamoDB Data
+
+After completing the lab exercises, try these visualization options:
+
+<details>
+  <summary>Data Export and Visualization Script</summary>
+  
+  Solution script: [visualize_data.sh](scripts/visualize_data.sh)
+</details>
+
+## DynamoDB Best Practices
+
+### Single-Table Design
+DynamoDB experts often use a single-table design pattern to store multiple entity types in one table. This approach:
+- Reduces the number of API calls needed
+- Improves application performance
+- Simplifies access patterns
+
+### Cost Optimization
+- Use sparse indexes to minimize storage costs
+- Consider switching between on-demand and provisioned capacity based on usage patterns
+- Implement TTL (Time to Live) for temporary data
+
+### Performance Tips
+- Keep item sizes small (under 4KB when possible)
+- Use ProjectionExpressions to retrieve only needed attributes
+- Implement caching for frequently accessed items
+
+## Batch Operations
+
+DynamoDB supports efficient batch operations for working with multiple items:
+
+<details>
+  <summary>BatchWriteItem Example Script</summary>
+  
+  Solution script: [batch_write_example.sh](scripts/batch_write_example.sh)
+</details>
+
+<details>
+  <summary>BatchGetItem Example Script</summary>
+  
+  Solution script: [batch_get_example.sh](scripts/batch_get_example.sh)
+</details>
+
+## Conditional Operations
+
+DynamoDB supports conditional writes to ensure data integrity:
+
+<details>
+  <summary>Conditional Update Example</summary>
+  
+  Solution script: [conditional_update.sh](scripts/conditional_update.sh)
+</details>
+
+<details>
+  <summary>Conditional Put Example</summary>
+  
+  Solution script: [conditional_put.sh](scripts/conditional_put.sh)
+</details>
+
+## Local Secondary Indexes (LSI)
+
+<details>
+  <summary>LSI Creation and Query Example</summary>
+  
+  Solution script: [lsi_example.sh](scripts/lsi_example.sh)
+</details>
