@@ -540,14 +540,299 @@ aws ec2 delete-subnet --subnet-id $SUBNET2_ID
 aws ec2 delete-vpc --vpc-id $VPC_ID
 ```
 
-## Challenge Activities
+## Challenge Section: School Database Challenges
 
-For students who finish early:
-1. Create a view that shows each student's average grade across all courses
-2. Create a function that calculates GPA based on letter grades
-3. Write a query to find courses where the average grade is above B+
-4. Create a report showing department statistics (number of courses, average credits, etc.)
-5. Modify the VPC to include a private subnet and place the RDS instance there, using a NAT Gateway for outbound connectivity
+Imagine you're working as a database administrator for a local high school. The school has recently migrated their student information system to AWS RDS PostgreSQL, and they need your help to create reports and implement new features. Complete the following challenges to help the school make the most of their database.
+
+### Challenge 1: Student Performance Analysis
+
+The school principal needs to identify students who might need academic support.
+
+```bash
+# Write a query to find students with an average grade below B (3.0 GPA) across all courses
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+SELECT s.student_id, s.first_name, s.last_name, 
+       AVG(CASE 
+           WHEN e.grade = 'A+' THEN 4.00
+           WHEN e.grade = 'A' THEN 4.00
+           WHEN e.grade = 'A-' THEN 3.67
+           WHEN e.grade = 'B+' THEN 3.33
+           WHEN e.grade = 'B' THEN 3.00
+           WHEN e.grade = 'B-' THEN 2.67
+           WHEN e.grade = 'C+' THEN 2.33
+           WHEN e.grade = 'C' THEN 2.00
+           ELSE 0
+       END) AS avg_grade
+FROM students s
+JOIN enrollments e ON s.student_id = e.student_id
+GROUP BY s.student_id, s.first_name, s.last_name
+HAVING AVG(CASE 
+           WHEN e.grade = 'A+' THEN 4.00
+           WHEN e.grade = 'A' THEN 4.00
+           WHEN e.grade = 'A-' THEN 3.67
+           WHEN e.grade = 'B+' THEN 3.33
+           WHEN e.grade = 'B' THEN 3.00
+           WHEN e.grade = 'B-' THEN 2.67
+           WHEN e.grade = 'C+' THEN 2.33
+           WHEN e.grade = 'C' THEN 2.00
+           ELSE 0
+       END) < 3.0
+ORDER BY avg_grade;"
+```
+
+**What happens in this query?**
+- The query joins the students and enrollments tables
+- It uses a CASE statement to convert letter grades to numeric values
+- The AVG function calculates each student's average grade
+- The HAVING clause filters to only show students with averages below 3.0
+- Results are ordered by average grade (lowest first)
+
+### Challenge 2: Department Workload Report
+
+The academic dean needs a report on department workloads to allocate resources for the next semester.
+
+```bash
+# Create a report showing each department's total credits, number of courses, and average class size
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+WITH course_enrollments AS (
+    SELECT c.course_id, c.department, c.credits, COUNT(e.student_id) AS num_students
+    FROM courses c
+    LEFT JOIN enrollments e ON c.course_id = e.course_id
+    GROUP BY c.course_id, c.department, c.credits
+)
+SELECT 
+    department,
+    COUNT(*) AS num_courses,
+    SUM(credits) AS total_credits,
+    ROUND(AVG(num_students), 2) AS avg_class_size
+FROM course_enrollments
+GROUP BY department
+ORDER BY total_credits DESC;"
+```
+
+**What happens in this query?**
+- The query uses a Common Table Expression (CTE) to first calculate enrollment counts for each course
+- It then aggregates this data by department
+- The COUNT function determines how many courses each department offers
+- SUM calculates the total credits across all courses in each department
+- AVG calculates the average class size (number of students)
+- Results are ordered by total credits (highest first)
+
+### Challenge 3: Create a Stored Function
+
+The registrar's office needs a function to calculate letter grades based on numeric scores.
+
+```bash
+# Create a function to convert numeric scores to letter grades
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+CREATE OR REPLACE FUNCTION calculate_letter_grade(score NUMERIC) 
+RETURNS VARCHAR(2) AS $$
+BEGIN
+    IF score >= 97 THEN
+        RETURN 'A+';
+    ELSIF score >= 93 THEN
+        RETURN 'A';
+    ELSIF score >= 90 THEN
+        RETURN 'A-';
+    ELSIF score >= 87 THEN
+        RETURN 'B+';
+    ELSIF score >= 83 THEN
+        RETURN 'B';
+    ELSIF score >= 80 THEN
+        RETURN 'B-';
+    ELSIF score >= 77 THEN
+        RETURN 'C+';
+    ELSIF score >= 73 THEN
+        RETURN 'C';
+    ELSIF score >= 70 THEN
+        RETURN 'C-';
+    ELSIF score >= 67 THEN
+        RETURN 'D+';
+    ELSIF score >= 63 THEN
+        RETURN 'D';
+    ELSIF score >= 60 THEN
+        RETURN 'D-';
+    ELSE
+        RETURN 'F';
+    END IF;
+END;
+$$ LANGUAGE plpgsql;"
+
+# Test the function with some sample scores
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+SELECT 
+    score,
+    calculate_letter_grade(score) AS letter_grade
+FROM (VALUES (98), (95), (91), (88), (85), (81), (78), (75), (71), (68), (65), (61), (55)) AS t(score);"
+```
+
+**What happens when creating this function?**
+- The CREATE OR REPLACE FUNCTION statement defines a new PostgreSQL function
+- The function takes a numeric score as input and returns a letter grade
+- It uses IF/ELSIF/ELSE logic to determine the appropriate grade based on score ranges
+- The LANGUAGE plpgsql specifies that we're using PostgreSQL's procedural language
+- The test query demonstrates how the function works with various scores
+
+### Challenge 4: Create a View for Academic Advisors
+
+Academic advisors need a comprehensive view of student information for advising sessions.
+
+```bash
+# Create a view that combines student information with their course enrollments and grades
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+CREATE OR REPLACE VIEW student_academic_profile AS
+SELECT 
+    s.student_id,
+    s.first_name,
+    s.last_name,
+    s.email,
+    s.major,
+    s.gpa AS overall_gpa,
+    c.course_code,
+    c.course_name,
+    c.credits,
+    e.grade,
+    e.enrollment_date
+FROM 
+    students s
+LEFT JOIN 
+    enrollments e ON s.student_id = e.student_id
+LEFT JOIN 
+    courses c ON e.course_id = c.course_id
+ORDER BY 
+    s.last_name, s.first_name, c.course_code;"
+
+# Query the view to see a specific student's profile
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+SELECT * FROM student_academic_profile WHERE student_id = 1;"
+```
+
+**What happens when creating this view?**
+- The CREATE OR REPLACE VIEW statement creates a virtual table that doesn't store data itself
+- The view joins data from students, enrollments, and courses tables
+- It provides a comprehensive profile of each student's academic information
+- When queried, the view executes its underlying query and returns the results
+- This simplifies complex queries for advisors who need this information regularly
+
+### Challenge 5: Database Triggers for Audit Logging
+
+The school needs to track changes to student records for compliance purposes.
+
+```bash
+# First, create an audit table
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+CREATE TABLE IF NOT EXISTS student_audit_log (
+    log_id SERIAL PRIMARY KEY,
+    action VARCHAR(10) NOT NULL,
+    student_id INTEGER NOT NULL,
+    changed_by VARCHAR(50) NOT NULL,
+    change_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    old_data JSONB,
+    new_data JSONB
+);"
+
+# Create a trigger function
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+CREATE OR REPLACE FUNCTION log_student_changes()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'DELETE') THEN
+        INSERT INTO student_audit_log(action, student_id, changed_by, old_data, new_data)
+        VALUES('DELETE', OLD.student_id, current_user, row_to_json(OLD)::jsonb, NULL);
+        RETURN OLD;
+    ELSIF (TG_OP = 'UPDATE') THEN
+        INSERT INTO student_audit_log(action, student_id, changed_by, old_data, new_data)
+        VALUES('UPDATE', NEW.student_id, current_user, row_to_json(OLD)::jsonb, row_to_json(NEW)::jsonb);
+        RETURN NEW;
+    ELSIF (TG_OP = 'INSERT') THEN
+        INSERT INTO student_audit_log(action, student_id, changed_by, old_data, new_data)
+        VALUES('INSERT', NEW.student_id, current_user, NULL, row_to_json(NEW)::jsonb);
+        RETURN NEW;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;"
+
+# Create the trigger
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+CREATE TRIGGER student_audit_trigger
+AFTER INSERT OR UPDATE OR DELETE ON students
+FOR EACH ROW EXECUTE FUNCTION log_student_changes();"
+
+# Test the trigger by updating a student record
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+UPDATE students SET gpa = 3.95 WHERE student_id = 1;"
+
+# Check the audit log
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+SELECT * FROM student_audit_log;"
+```
+
+**What happens with this trigger setup?**
+- We first create an audit_log table to store change history
+- The trigger function captures the type of change (INSERT, UPDATE, DELETE)
+- It stores both the old and new values when appropriate
+- The trigger is set to fire AFTER any change to the students table
+- When a student record is modified, the change is automatically logged
+- This provides a complete audit trail for compliance and troubleshooting
+
+### Bonus Challenge: Database Performance Optimization
+
+The database is experiencing slow query performance as the number of students and courses grows.
+
+#### Understanding Database Indexes
+
+A database index is a data structure that improves the speed of data retrieval operations on a database table. Think of it like the index at the back of a textbook - instead of scanning through the entire book to find information on a specific topic, you can look up the topic in the index and go directly to the relevant pages.
+
+**How indexes work:**
+- Indexes create a separate data structure that contains only the indexed columns and pointers to the corresponding table rows
+- When you query an indexed column, the database can quickly find the matching values in the index
+- The database then uses the pointers to retrieve the complete rows from the table
+- Without indexes, the database would need to scan every row in the table (a "full table scan")
+
+**Benefits of indexes:**
+- Dramatically faster query performance for large tables
+- Improved efficiency for JOIN operations
+- Better performance for ORDER BY and GROUP BY operations
+- Enforcement of uniqueness constraints (with UNIQUE indexes)
+
+**Potential drawbacks:**
+- Indexes require additional storage space
+- Write operations (INSERT, UPDATE, DELETE) become slightly slower because indexes must be updated
+- Inappropriate indexes can sometimes decrease performance
+
+1. Create appropriate indexes to improve query performance:
+
+```bash
+# Create indexes on frequently queried columns
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+-- Index for student lookups by email
+CREATE INDEX idx_students_email ON students(email);
+
+-- Index for course lookups by code
+CREATE INDEX idx_courses_code ON courses(course_code);
+
+-- Index for enrollments lookups
+CREATE INDEX idx_enrollments_student ON enrollments(student_id);
+CREATE INDEX idx_enrollments_course ON enrollments(course_id);"
+```
+
+**What happens when creating these indexes?**
+- The `CREATE INDEX` statement builds a new index on the specified column
+- PostgreSQL scans the table and builds a sorted data structure for the indexed column
+- The `idx_students_email` index will speed up queries that filter or join on the email column
+- The foreign key indexes (`idx_enrollments_student` and `idx_enrollments_course`) improve JOIN performance
+- Each index is named with a prefix (`idx_`) to clearly identify it as an index
+
+2. Analyze the database to update statistics for the query planner:
+
+```bash
+# Analyze the database to improve query planning
+PGPASSWORD=$DB_PASSWORD psql -h $ENDPOINT -U $DB_USER -d $DB_NAME -c "
+ANALYZE students;
+ANALYZE courses;
+ANALYZE enrollments;"
+```
 
 ## Troubleshooting
 
