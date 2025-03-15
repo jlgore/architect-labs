@@ -181,41 +181,32 @@ resource "aws_db_subnet_group" "main" {
 # RDS Instance
 resource "aws_db_instance" "main" {
   identifier           = "rds-${random_id.unique_id.hex}"
-  engine              = "mysql"
-  engine_version      = var.db_engine_version
-  instance_class      = var.db_instance_class
-  allocated_storage   = var.db_allocated_storage
-  storage_type        = "gp2"
+  engine               = "mysql"
+  engine_version       = var.db_engine_version
+  instance_class       = "db.t3.micro"
+  allocated_storage    = var.db_allocated_storage
+  storage_type         = "gp2"
   
-  db_name             = var.db_name
-  username            = var.db_username
-  password            = var.db_password
+  db_name              = var.db_name
+  username             = var.db_username
+  password             = var.db_password
   
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds_sg.id]
   
   skip_final_snapshot    = true
   publicly_accessible    = false
+  multi_az               = false
+  monitoring_interval    = 0
   
   tags = {
     Name = "${var.project_name}RDS-${random_id.unique_id.hex}"
   }
 }
 
-# Get latest Amazon Linux 2 AMI
-data "aws_ami" "amazon_linux_2" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
+# Fetch AMI ID from GitHub
+data "http" "ami_id" {
+  url = var.ami_url
 }
 
 # Key Pair
@@ -226,10 +217,10 @@ resource "aws_key_pair" "ssh_key" {
 
 # EC2 Instance
 resource "aws_instance" "app_server" {
-  ami                    = data.aws_ami.amazon_linux_2.id
+  ami                    = trimspace(data.http.ami_id.body)
   instance_type          = var.ec2_instance_type
-  key_name              = aws_key_pair.ssh_key.key_name
-  subnet_id             = aws_subnet.public_1.id
+  key_name               = aws_key_pair.ssh_key.key_name
+  subnet_id              = aws_subnet.public_1.id
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
 
   user_data = <<-EOF

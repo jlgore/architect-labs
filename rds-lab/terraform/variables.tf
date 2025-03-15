@@ -75,4 +75,23 @@ variable "db_name" {
   description = "Database name"
   type        = string
   default     = "mydatabase"
+}
+
+variable "ami_url" {
+  description = "URL to fetch the AMI ID"
+  type        = string
+  default     = "https://raw.githubusercontent.com/jlgore/architect-labs/refs/heads/main/ami/amiId.txt"
+}
+
+variable "db_username" {
+  description = "Database username"
+  type        = string
+  default     = "admin"
+}
+
+variable "db_password" {
+  description = "Database password"
+  type        = string
+  default     = "Password123!"
+  sensitive   = true
 } 
