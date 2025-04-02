@@ -61,7 +61,7 @@ echo "VPC-B ID: $VPC_B_ID"
 
 ### 3. Create Subnets in Each VPC
 
-Now we'll create subnets within each VPC. A subnet is a segment of a VPC's IP address range where you can place groups of isolated resources. We'll create one subnet in each VPC, both in the same availability zone (us-east-1a) to ensure low-latency communication between instances.
+Now we'll create subnets within each VPC. A subnet is a segment of a VPC's IP address range where you can place groups of isolated resources. We'll create one subnet in each VPC, both in the same availability zone (us-east-1a) to ensure low-latency communication between instances. We'll also enable auto-assign public IP for both subnets to ensure our instances get public IP addresses.
 
 ```bash
 # Create a subnet in VPC-A with a smaller CIDR block (10.0.1.0/24 provides 256 IP addresses)
@@ -85,7 +85,21 @@ SUBNET_B_ID=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=Subnet-B"
 echo "Subnet-B ID: $SUBNET_B_ID"
 ```
 
-### 5. Create Internet Gateways
+### 5. Enable Auto-assign Public IP for Subnets
+
+To ensure our instances get public IP addresses, we need to enable auto-assign public IP for both subnets. This is essential for being able to SSH into the instances from the internet.
+
+```bash
+# Enable auto-assign public IP for Subnet-A
+aws ec2 modify-subnet-attribute --subnet-id $SUBNET_A_ID --map-public-ip-on-launch
+
+# Enable auto-assign public IP for Subnet-B
+aws ec2 modify-subnet-attribute --subnet-id $SUBNET_B_ID --map-public-ip-on-launch
+
+echo "Auto-assign public IP has been enabled for both subnets"
+```
+
+### 6. Create Internet Gateways
 
 Internet Gateways (IGWs) allow communication between instances in your VPC and the internet. We need to create and attach an IGW to each VPC to allow our instances to connect to the internet and to allow us to SSH into them.
 
@@ -105,7 +119,7 @@ IGW_B_ID=$(aws ec2 describe-internet-gateways --filters "Name=tag:Name,Values=IG
 aws ec2 attach-internet-gateway --vpc-id $VPC_B_ID --internet-gateway-id $IGW_B_ID
 ```
 
-### 6. Create Route Tables
+### 7. Create Route Tables
 
 Route tables control where network traffic is directed. Each subnet in your VPC must be associated with a route table, which defines the routes for outbound traffic. Here, we'll create route tables for each VPC, add routes to the internet via the IGWs, and associate them with our subnets.
 
@@ -133,7 +147,7 @@ aws ec2 create-route --route-table-id $RT_B_ID --destination-cidr-block 0.0.0.0/
 aws ec2 associate-route-table --route-table-id $RT_B_ID --subnet-id $SUBNET_B_ID
 ```
 
-### 7. Create a VPC Peering Connection
+### 8. Create a VPC Peering Connection
 
 A VPC peering connection is a networking connection between two VPCs that enables routing using private IP addresses as if they were part of the same network. In this step, we'll create a peering connection between VPC-A and VPC-B and then accept it (both actions are needed because peering requires a request and acceptance).
 
@@ -148,7 +162,7 @@ PEER_ID=$(aws ec2 describe-vpc-peering-connections --filters "Name=tag:Name,Valu
 aws ec2 accept-vpc-peering-connection --vpc-peering-connection-id $PEER_ID
 ```
 
-### 8. Configure Route Tables for Peering
+### 9. Configure Route Tables for Peering
 
 Just creating a peering connection isn't enough - we need to update our route tables to direct traffic through the peering connection. We'll add routes to each VPC's route table that direct traffic destined for the other VPC's CIDR range through the peering connection.
 
@@ -160,7 +174,7 @@ aws ec2 create-route --route-table-id $RT_A_ID --destination-cidr-block 172.16.0
 aws ec2 create-route --route-table-id $RT_B_ID --destination-cidr-block 10.0.0.0/16 --vpc-peering-connection-id $PEER_ID
 ```
 
-### 9. Create Security Groups
+### 10. Create Security Groups
 
 Security groups act as virtual firewalls that control inbound and outbound traffic to your instances. We'll create security groups for each VPC with rules that allow SSH access from anywhere and ICMP (ping) traffic from the other VPC, which is necessary for our connectivity test.
 
@@ -190,7 +204,7 @@ aws ec2 authorize-security-group-ingress --group-id $SG_B_ID --protocol icmp --p
 # Note: No need to add an explicit outbound rule as it's created by default
 ```
 
-### 10. Get the Latest Amazon Linux AMI ID
+### 11. Get the Latest Amazon Linux AMI ID
 
 Before launching EC2 instances, we need to get the latest Amazon Linux AMI ID from AWS Systems Manager Parameter Store. This ensures we use an up-to-date AMI that exists in our region.
 
@@ -200,23 +214,41 @@ AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2
 echo "Latest Amazon Linux AMI ID: $AMI_ID"
 ```
 
-### 11. Launch EC2 Instances in Each VPC
+### 12. Launch EC2 Instances in Each VPC
 
-Now we'll launch EC2 instances in each VPC to test the peering connection. We'll use t2.micro instances (which are free tier eligible and sandbox-compatible) running the latest Amazon Linux 2023 AMI and the "vockey" key pair provided by the sandbox environment.
+Now we'll launch EC2 instances in each VPC to test the peering connection. We'll use t2.micro instances (which are free tier eligible and sandbox-compatible) running the latest Amazon Linux 2023 AMI and the "vockey" key pair provided by the sandbox environment. We'll explicitly associate public IPs with our instances for SSH access.
 
 ```bash
-# Launch an EC2 instance in VPC-A
-aws ec2 run-instances --image-id $AMI_ID --count 1 --instance-type t2.micro --key-name vockey --subnet-id $SUBNET_A_ID --security-group-ids $SG_A_ID --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-A}]'
+# Launch an EC2 instance in VPC-A with a public IP
+aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --count 1 \
+  --instance-type t2.micro \
+  --key-name vockey \
+  --subnet-id $SUBNET_A_ID \
+  --security-group-ids $SG_A_ID \
+  --associate-public-ip-address \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-A}]'
+
 # Get the instance ID and store it in a variable
 INSTANCE_A_ID=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=Instance-A" "Name=instance-state-name,Values=pending,running" --query "Reservations[0].Instances[0].InstanceId" --output text)
 
-# Launch an EC2 instance in VPC-B
-aws ec2 run-instances --image-id $AMI_ID --count 1 --instance-type t2.micro --key-name vockey --subnet-id $SUBNET_B_ID --security-group-ids $SG_B_ID --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-B}]'
+# Launch an EC2 instance in VPC-B with a public IP
+aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --count 1 \
+  --instance-type t2.micro \
+  --key-name vockey \
+  --subnet-id $SUBNET_B_ID \
+  --security-group-ids $SG_B_ID \
+  --associate-public-ip-address \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-B}]'
+
 # Get the instance ID and store it in a variable
 INSTANCE_B_ID=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=Instance-B" "Name=instance-state-name,Values=pending,running" --query "Reservations[0].Instances[0].InstanceId" --output text)
 ```
 
-### 12. Wait for Instances to be Running
+### 13. Wait for Instances to be Running
 
 EC2 instances take a short time to initialize. We'll use the AWS CLI's wait command to pause execution until our instances are fully running before we attempt to test connectivity.
 
@@ -230,7 +262,7 @@ aws ec2 wait instance-running --instance-ids $INSTANCE_B_ID
 echo "Instance-B is now running"
 ```
 
-### 13. Test Connectivity
+### 14. Test Connectivity
 
 Finally, we'll test the VPC peering connection by trying to ping from one instance to the other. If our peering connection and all associated configurations (routes, security groups) are set up correctly, the ping should succeed.
 
@@ -300,6 +332,12 @@ aws ec2 delete-vpc --vpc-id $VPC_B_ID
   - Route table configurations
   - VPC peering connection status
   - Instance network ACLs
+
+- If you see "None" for public IP addresses, ensure:
+  - Auto-assign public IP is enabled for subnets
+  - The `--associate-public-ip-address` flag is included in the EC2 run-instances command
+  - Internet Gateway is properly attached to the VPC
+  - Route table has a route to 0.0.0.0/0 via the Internet Gateway
 
 - If you encounter permission errors, verify your IAM permissions
 
