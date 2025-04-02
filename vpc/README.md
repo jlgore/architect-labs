@@ -565,141 +565,40 @@ sleep 30
 
 ### Step 10.7: Test Connectivity and Routing
 
-Now, let's SSH into the public instance and test connectivity:
+Now, let's create instructions for testing connectivity:
 
 ```bash
-# Create a simple test script to run
-cat > test_commands.txt << EOF
-echo "===== Testing from Public Instance ====="
-./test_connectivity.sh $PRIVATE_INSTANCE_IP
-echo -e "\n===== Testing SSH Access to Private Instance ====="
-ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@$PRIVATE_INSTANCE_IP "./test_internet.sh"
-EOF
-```
-
-```bash
-# Print instructions for manual testing
+# Display the connection information for testing
 echo -e "\n===================================================================="
-echo "To test connectivity, SSH to the public instance and run the tests:"
-echo "ssh -i $KEY_NAME.pem ec2-user@$PUBLIC_INSTANCE_IP"
+echo "To test connectivity between instances:"
 echo ""
-echo "Once logged in, run:"
-echo "./test_connectivity.sh $PRIVATE_INSTANCE_IP"
+echo "1. First, connect to the public instance:"
+echo "   ssh -i $KEY_NAME.pem ec2-user@$PUBLIC_INSTANCE_IP"
 echo ""
-echo "To access the private instance from the public instance, run:"
-echo "ssh ec2-user@$PRIVATE_INSTANCE_IP"
+echo "2. Once connected to the public instance, test internet connectivity:"
+echo "   ping -c 3 amazon.com"
+echo ""
+echo "3. Test connectivity to the private instance:"
+echo "   ping -c 3 $PRIVATE_INSTANCE_IP"
+echo ""
+echo "4. Connect to the private instance from the public instance:"
+echo "   ssh ec2-user@$PRIVATE_INSTANCE_IP"
+echo ""
+echo "5. On the private instance, test internet connectivity (should fail):"
+echo "   ./test_internet.sh"
+echo ""
+echo "6. Exit back to the public instance:"
+echo "   exit"
+echo ""
+echo "7. Exit back to your CloudShell:"
+echo "   exit"
 echo "===================================================================="
 ```
 
-### Step 10.8: Manual Testing Walkthrough
-
-Let's walk through the process of manually testing connectivity between instances:
-
-#### 1. Connect to the Public Instance
-
-First, SSH into the public instance using the key pair we created:
-
-```bash
-# From your CloudShell environment, connect to the public instance
-ssh -i $KEY_NAME.pem ec2-user@$PUBLIC_INSTANCE_IP
-```
-
-You should see a welcome message similar to:
-
-```
-=======================================================================
-Welcome to the VPC Lab Public Instance!
-
-To test connectivity to the private instance, run:
-  ./test_connectivity.sh <PRIVATE_INSTANCE_IP>
-
-To SSH to the private instance, run:
-  ssh ec2-user@<PRIVATE_INSTANCE_IP>
-=======================================================================
-```
-
-#### 2. Test Internet Connectivity from Public Instance
-
-Let's confirm that our public instance has internet connectivity:
-
-```bash
-# Test internet connectivity from within the public instance
-ping -c 3 amazon.com
-```
-
-You should see successful ping responses, showing that the public instance can reach the internet through the Internet Gateway.
-
-#### 3. Test Connectivity to Private Instance
-
-Now, let's test that our public instance can communicate with the private instance:
-
-```bash
-# From the public instance, ping the private instance
-# Replace PRIVATE_INSTANCE_IP with the actual private IP
-ping -c 3 $PRIVATE_INSTANCE_IP
-```
-
-You should see successful ping responses, showing that the routing within the VPC is working correctly.
-
-#### 4. Connect to the Private Instance
-
-From the public instance, connect to the private instance:
-
-```bash
-# SSH from public to private instance
-ssh ec2-user@$PRIVATE_INSTANCE_IP
-```
-
-You should see a welcome message similar to:
-
-```
-=======================================================================
-Welcome to the VPC Lab Private Instance!
-
-To test internet connectivity, run:
-  ./test_internet.sh
-=======================================================================
-```
-
-#### 5. Test Internet Connectivity from Private Instance
-
-While connected to the private instance, test its internet connectivity:
-
-```bash
-# Run the test script on the private instance
-./test_internet.sh
-```
-
-You should see that the ping to amazon.com fails, confirming that the private instance cannot access the internet directly (as expected without a NAT Gateway).
-
-#### 6. Return to Public Instance and CloudShell
-
-To return to the public instance:
-
-```bash
-# Exit from private instance back to public instance
-exit
-```
-
-To return to CloudShell:
-
-```bash
-# Exit from public instance back to CloudShell
-exit
-```
-
-This walkthrough demonstrates:
-- The public subnet has internet access through the Internet Gateway
-- The private subnet can communicate with the public subnet
-- The private subnet cannot access the internet (without a NAT Gateway)
-- The security groups are correctly configured to allow traffic between instances
-
-What we've demonstrated:
-- How to set up key-based SSH access to EC2 instances
-- That the public instance can access both the internet and the private instance
-- That the private instance can communicate with the public instance
-- That the private instance cannot access the internet directly without a NAT Gateway
-- SSH access from the public subnet to the private subnet works as configured in the security groups
+This approach:
+1. Provides clear, step-by-step instructions for manual testing
+2. Shows the exact commands to run at each step
+3. Explains what to expect at each testing stage
 
 ## Step 11: Verify Our VPC Setup
 
