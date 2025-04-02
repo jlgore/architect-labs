@@ -175,8 +175,7 @@ SG_A_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=Sec
 aws ec2 authorize-security-group-ingress --group-id $SG_A_ID --protocol tcp --port 22 --cidr 0.0.0.0/0
 # Allow ICMP (ping) from VPC-B's CIDR block
 aws ec2 authorize-security-group-ingress --group-id $SG_A_ID --protocol icmp --port -1 --cidr 172.16.0.0/16
-# Allow all outbound traffic
-aws ec2 authorize-security-group-egress --group-id $SG_A_ID --protocol -1 --port -1 --cidr 0.0.0.0/0
+# Note: Security groups are created with a default "allow all outbound traffic" rule, so we don't need to add it explicitly
 
 # Create a Security Group for VPC-B
 aws ec2 create-security-group --group-name Security-Group-B --description "Security group for VPC B" --vpc-id $VPC_B_ID
@@ -188,27 +187,36 @@ SG_B_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=Sec
 aws ec2 authorize-security-group-ingress --group-id $SG_B_ID --protocol tcp --port 22 --cidr 0.0.0.0/0
 # Allow ICMP (ping) from VPC-A's CIDR block
 aws ec2 authorize-security-group-ingress --group-id $SG_B_ID --protocol icmp --port -1 --cidr 10.0.0.0/16
-# Allow all outbound traffic
-aws ec2 authorize-security-group-egress --group-id $SG_B_ID --protocol -1 --port -1 --cidr 0.0.0.0/0
+# Note: No need to add an explicit outbound rule as it's created by default
 ```
 
-### 10. Launch EC2 Instances in Each VPC
+### 10. Get the Latest Amazon Linux AMI ID
 
-Now we'll launch EC2 instances in each VPC to test the peering connection. We'll use t2.micro instances (which are free tier eligible and sandbox-compatible) running Amazon Linux 2 and the "vockey" key pair provided by the sandbox environment.
+Before launching EC2 instances, we need to get the latest Amazon Linux AMI ID from AWS Systems Manager Parameter Store. This ensures we use an up-to-date AMI that exists in our region.
+
+```bash
+# Get the latest Amazon Linux 2023 AMI ID from the SSM Parameter Store
+AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64 --query "Parameters[0].Value" --output text)
+echo "Latest Amazon Linux AMI ID: $AMI_ID"
+```
+
+### 11. Launch EC2 Instances in Each VPC
+
+Now we'll launch EC2 instances in each VPC to test the peering connection. We'll use t2.micro instances (which are free tier eligible and sandbox-compatible) running the latest Amazon Linux 2023 AMI and the "vockey" key pair provided by the sandbox environment.
 
 ```bash
 # Launch an EC2 instance in VPC-A
-aws ec2 run-instances --image-id ami-0c55b159cbfafe1f0 --count 1 --instance-type t2.micro --key-name vockey --subnet-id $SUBNET_A_ID --security-group-ids $SG_A_ID --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-A}]'
+aws ec2 run-instances --image-id $AMI_ID --count 1 --instance-type t2.micro --key-name vockey --subnet-id $SUBNET_A_ID --security-group-ids $SG_A_ID --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-A}]'
 # Get the instance ID and store it in a variable
 INSTANCE_A_ID=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=Instance-A" "Name=instance-state-name,Values=pending,running" --query "Reservations[0].Instances[0].InstanceId" --output text)
 
 # Launch an EC2 instance in VPC-B
-aws ec2 run-instances --image-id ami-0c55b159cbfafe1f0 --count 1 --instance-type t2.micro --key-name vockey --subnet-id $SUBNET_B_ID --security-group-ids $SG_B_ID --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-B}]'
+aws ec2 run-instances --image-id $AMI_ID --count 1 --instance-type t2.micro --key-name vockey --subnet-id $SUBNET_B_ID --security-group-ids $SG_B_ID --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Instance-B}]'
 # Get the instance ID and store it in a variable
 INSTANCE_B_ID=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=Instance-B" "Name=instance-state-name,Values=pending,running" --query "Reservations[0].Instances[0].InstanceId" --output text)
 ```
 
-### 11. Wait for Instances to be Running
+### 12. Wait for Instances to be Running
 
 EC2 instances take a short time to initialize. We'll use the AWS CLI's wait command to pause execution until our instances are fully running before we attempt to test connectivity.
 
@@ -222,7 +230,7 @@ aws ec2 wait instance-running --instance-ids $INSTANCE_B_ID
 echo "Instance-B is now running"
 ```
 
-### 12. Test Connectivity
+### 13. Test Connectivity
 
 Finally, we'll test the VPC peering connection by trying to ping from one instance to the other. If our peering connection and all associated configurations (routes, security groups) are set up correctly, the ping should succeed.
 
@@ -299,3 +307,4 @@ aws ec2 delete-vpc --vpc-id $VPC_B_ID
 
 - [AWS VPC Peering Documentation](https://docs.aws.amazon.com/vpc/latest/peering/what-is-vpc-peering.html)
 - [AWS CLI Command Reference](https://docs.aws.amazon.com/cli/latest/reference/)
+- [AWS Systems Manager Parameter Store for AMIs](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-store-public-parameters-ami.html)
