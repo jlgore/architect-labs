@@ -374,11 +374,19 @@ aws autoscaling delete-auto-scaling-group \
 aws ec2 delete-launch-template \
     --launch-template-id $LAUNCH_TEMPLATE_ID
 
+# Delete ALB Listener first
+aws elbv2 delete-listener \
+    --listener-arn $LISTENER_ARN
+
 # Delete ALB
 aws elbv2 delete-load-balancer \
     --load-balancer-arn $ALB_ARN
 
-# Delete Target Group
+# Wait for ALB to be deleted
+aws elbv2 wait load-balancers-deleted \
+    --load-balancer-arns $ALB_ARN
+
+# Now delete Target Group
 aws elbv2 delete-target-group \
     --target-group-arn $TARGET_GROUP_ARN
 
