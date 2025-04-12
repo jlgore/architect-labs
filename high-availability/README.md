@@ -19,19 +19,25 @@ In this lab, you will:
 
 ## Step 1: Create VPC and Networking Components
 
-```bash
-# Set variables
-VPC_NAME="ha-lab-vpc"
-VPC_CIDR="10.0.0.0/16"
-PUBLIC_SUBNET_1_CIDR="10.0.1.0/24"
-PUBLIC_SUBNET_2_CIDR="10.0.2.0/24"
-PRIVATE_SUBNET_1_CIDR="10.0.3.0/24"
-PRIVATE_SUBNET_2_CIDR="10.0.4.0/24"
-REGION="us-east-1"
-AZ1="${REGION}a"
-AZ2="${REGION}b"
+This step creates the networking foundation for our high availability setup. We'll create:
+- A VPC with public and private subnets in two availability zones
+- An Internet Gateway for public internet access
+- A NAT Gateway for private subnet internet access
+- Route tables to control traffic flow
 
-# Create VPC
+```bash
+# Set variables for our networking components
+VPC_NAME="ha-lab-vpc"
+VPC_CIDR="10.0.0.0/16"  # This defines the IP range for our VPC
+PUBLIC_SUBNET_1_CIDR="10.0.1.0/24"  # First public subnet in AZ1
+PUBLIC_SUBNET_2_CIDR="10.0.2.0/24"  # Second public subnet in AZ2
+PRIVATE_SUBNET_1_CIDR="10.0.3.0/24"  # First private subnet in AZ1
+PRIVATE_SUBNET_2_CIDR="10.0.4.0/24"  # Second private subnet in AZ2
+REGION="us-east-1"
+AZ1="${REGION}a"  # First availability zone
+AZ2="${REGION}b"  # Second availability zone
+
+# Create VPC - This is our isolated network environment
 VPC_ID=$(aws ec2 create-vpc \
     --cidr-block $VPC_CIDR \
     --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=$VPC_NAME}]" \
@@ -39,24 +45,24 @@ VPC_ID=$(aws ec2 create-vpc \
     --output text)
 echo "VPC created with ID: $VPC_ID"
 
-# Enable DNS hostnames
+# Enable DNS hostnames - Required for public DNS resolution
 aws ec2 modify-vpc-attribute \
     --vpc-id $VPC_ID \
     --enable-dns-hostnames
 
-# Create Internet Gateway
+# Create Internet Gateway - This allows our VPC to connect to the internet
 IGW_ID=$(aws ec2 create-internet-gateway \
     --tag-specifications "ResourceType=internet-gateway,Tags=[{Key=Name,Value=ha-lab-igw}]" \
     --query 'InternetGateway.InternetGatewayId' \
     --output text)
 echo "Internet Gateway created with ID: $IGW_ID"
 
-# Attach IGW to VPC
+# Attach IGW to VPC - This connects our VPC to the internet
 aws ec2 attach-internet-gateway \
     --internet-gateway-id $IGW_ID \
     --vpc-id $VPC_ID
 
-# Create public subnets
+# Create public subnets - These will host our load balancer
 PUBLIC_SUBNET_1_ID=$(aws ec2 create-subnet \
     --vpc-id $VPC_ID \
     --cidr-block $PUBLIC_SUBNET_1_CIDR \
@@ -75,7 +81,7 @@ PUBLIC_SUBNET_2_ID=$(aws ec2 create-subnet \
     --output text)
 echo "Public Subnet 2 created with ID: $PUBLIC_SUBNET_2_ID"
 
-# Create private subnets
+# Create private subnets - These will host our application instances
 PRIVATE_SUBNET_1_ID=$(aws ec2 create-subnet \
     --vpc-id $VPC_ID \
     --cidr-block $PRIVATE_SUBNET_1_CIDR \
@@ -94,7 +100,7 @@ PRIVATE_SUBNET_2_ID=$(aws ec2 create-subnet \
     --output text)
 echo "Private Subnet 2 created with ID: $PRIVATE_SUBNET_2_ID"
 
-# Create NAT Gateway in public subnet 1
+# Create NAT Gateway - This allows private subnets to access the internet
 EIP_ID=$(aws ec2 allocate-address \
     --domain vpc \
     --query 'AllocationId' \
@@ -109,10 +115,10 @@ NAT_GW_ID=$(aws ec2 create-nat-gateway \
     --output text)
 echo "NAT Gateway created with ID: $NAT_GW_ID"
 
-# Wait for NAT Gateway to be available
+# Wait for NAT Gateway to be available - This ensures it's ready before we proceed
 aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_GW_ID
 
-# Create route tables
+# Create route tables - These control how traffic is routed
 PUBLIC_RT_ID=$(aws ec2 create-route-table \
     --vpc-id $VPC_ID \
     --tag-specifications "ResourceType=route-table,Tags=[{Key=Name,Value=ha-lab-public-rt}]" \
@@ -127,18 +133,21 @@ PRIVATE_RT_ID=$(aws ec2 create-route-table \
     --output text)
 echo "Private Route Table created with ID: $PRIVATE_RT_ID"
 
-# Add routes
+# Add routes to route tables
+# Public route table gets a route to the internet
 aws ec2 create-route \
     --route-table-id $PUBLIC_RT_ID \
     --destination-cidr-block 0.0.0.0/0 \
     --gateway-id $IGW_ID
 
+# Private route table gets a route through the NAT Gateway
 aws ec2 create-route \
     --route-table-id $PRIVATE_RT_ID \
     --destination-cidr-block 0.0.0.0/0 \
     --nat-gateway-id $NAT_GW_ID
 
 # Associate route tables with subnets
+# Public subnets use the public route table
 aws ec2 associate-route-table \
     --route-table-id $PUBLIC_RT_ID \
     --subnet-id $PUBLIC_SUBNET_1_ID
@@ -147,6 +156,7 @@ aws ec2 associate-route-table \
     --route-table-id $PUBLIC_RT_ID \
     --subnet-id $PUBLIC_SUBNET_2_ID
 
+# Private subnets use the private route table
 aws ec2 associate-route-table \
     --route-table-id $PRIVATE_RT_ID \
     --subnet-id $PRIVATE_SUBNET_1_ID
@@ -158,8 +168,12 @@ aws ec2 associate-route-table \
 
 ## Step 2: Create Security Groups
 
+Security groups act as virtual firewalls for our instances. We'll create two:
+- One for the Application Load Balancer (ALB)
+- One for our EC2 instances
+
 ```bash
-# Create ALB security group
+# Create ALB security group - This controls access to our load balancer
 ALB_SG_ID=$(aws ec2 create-security-group \
     --group-name ha-lab-alb-sg \
     --description "Security group for ALB" \
@@ -168,7 +182,7 @@ ALB_SG_ID=$(aws ec2 create-security-group \
     --output text)
 echo "ALB Security Group created with ID: $ALB_SG_ID"
 
-# Create EC2 security group
+# Create EC2 security group - This controls access to our application instances
 EC2_SG_ID=$(aws ec2 create-security-group \
     --group-name ha-lab-ec2-sg \
     --description "Security group for EC2 instances" \
@@ -177,14 +191,14 @@ EC2_SG_ID=$(aws ec2 create-security-group \
     --output text)
 echo "EC2 Security Group created with ID: $EC2_SG_ID"
 
-# Add inbound rules to ALB security group
+# Add inbound rules to ALB security group - Allow HTTP traffic from anywhere
 aws ec2 authorize-security-group-ingress \
     --group-id $ALB_SG_ID \
     --protocol tcp \
     --port 80 \
     --cidr 0.0.0.0/0
 
-# Add inbound rules to EC2 security group
+# Add inbound rules to EC2 security group - Only allow traffic from the ALB
 aws ec2 authorize-security-group-ingress \
     --group-id $EC2_SG_ID \
     --protocol tcp \
@@ -194,8 +208,13 @@ aws ec2 authorize-security-group-ingress \
 
 ## Step 3: Create Application Load Balancer
 
+The Application Load Balancer (ALB) distributes traffic across our instances. We'll create:
+- The ALB itself
+- A target group for the instances
+- A listener to handle HTTP traffic
+
 ```bash
-# Create ALB
+# Create ALB - This will distribute traffic across our instances
 ALB_ARN=$(aws elbv2 create-load-balancer \
     --name ha-lab-alb \
     --subnets $PUBLIC_SUBNET_1_ID $PUBLIC_SUBNET_2_ID \
@@ -206,7 +225,7 @@ ALB_ARN=$(aws elbv2 create-load-balancer \
     --output text)
 echo "ALB created with ARN: $ALB_ARN"
 
-# Create target group
+# Create target group - This defines where the ALB sends traffic
 TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
     --name ha-lab-tg \
     --protocol HTTP \
@@ -222,7 +241,7 @@ TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
     --output text)
 echo "Target Group created with ARN: $TARGET_GROUP_ARN"
 
-# Create listener
+# Create listener - This defines how the ALB handles incoming traffic
 LISTENER_ARN=$(aws elbv2 create-listener \
     --load-balancer-arn $ALB_ARN \
     --protocol HTTP \
@@ -235,6 +254,11 @@ echo "Listener created with ARN: $LISTENER_ARN"
 
 ## Step 4: Create Launch Template
 
+The launch template defines how our EC2 instances will be configured. We'll:
+- Use the latest Amazon Linux 2023 AMI
+- Configure instance type and security groups
+- Set up a simple web server
+
 ```bash
 # Get the latest Amazon Linux 2023 AMI ID
 AMI_ID=$(aws ssm get-parameter \
@@ -243,7 +267,7 @@ AMI_ID=$(aws ssm get-parameter \
     --output text)
 echo "Using AMI ID: $AMI_ID"
 
-# Create launch template
+# Create launch template - This defines how our instances will be configured
 LAUNCH_TEMPLATE_ID=$(aws ec2 create-launch-template \
     --launch-template-name ha-lab-lt \
     --version-description "Initial version" \
@@ -269,8 +293,13 @@ echo "Launch Template created with ID: $LAUNCH_TEMPLATE_ID"
 
 ## Step 5: Create Auto Scaling Group
 
+The Auto Scaling Group manages our EC2 instances. We'll:
+- Create the group with our launch template
+- Configure scaling based on CPU utilization
+- Distribute instances across availability zones
+
 ```bash
-# Create Auto Scaling Group
+# Create Auto Scaling Group - This manages our EC2 instances
 ASG_NAME="ha-lab-asg"
 aws autoscaling create-auto-scaling-group \
     --auto-scaling-group-name $ASG_NAME \
@@ -283,7 +312,7 @@ aws autoscaling create-auto-scaling-group \
     --health-check-type ELB \
     --health-check-grace-period 300
 
-# Create CPU-based scaling policy
+# Create CPU-based scaling policy - This automatically adjusts instance count based on CPU usage
 aws autoscaling put-scaling-policy \
     --auto-scaling-group-name $ASG_NAME \
     --policy-name cpu-scaling-policy \
@@ -299,25 +328,23 @@ aws autoscaling put-scaling-policy \
 
 ## Step 6: Test High Availability and Scaling
 
-1. Get the ALB DNS name:
+This step demonstrates the high availability and scaling features:
+- Test basic connectivity
+- Generate load to trigger scaling
+- Monitor the scaling process
+
 ```bash
+# Get the ALB DNS name - This is how users will access our application
 ALB_DNS=$(aws elbv2 describe-load-balancers \
     --load-balancer-arns $ALB_ARN \
     --query 'LoadBalancers[0].DNSName' \
     --output text)
 echo "ALB DNS: $ALB_DNS"
-```
 
-2. Test the application by visiting the ALB DNS name in a web browser. You should see responses from different instances.
+# Test basic connectivity
+curl http://$ALB_DNS/
 
-3. Generate Load Using Multiple Methods:
-
-```bash
-# Method 1: Install and use Apache Benchmark
-sudo dnf install -y httpd-tools
-ab -n 1000 -c 10 http://$ALB_DNS/
-
-# Method 2: Create a load testing script
+# Create a load testing script - This will help us generate traffic
 cat > load_test.sh << 'EOF'
 #!/bin/bash
 while true; do
@@ -333,7 +360,7 @@ for i in {1..5}; do
     echo "Started load test process $i"
 done
 
-# Monitor the Auto Scaling Group
+# Monitor the Auto Scaling Group - Watch as instances scale up
 watch -n 5 "aws autoscaling describe-auto-scaling-groups \
     --auto-scaling-group-names $ASG_NAME \
     --query 'AutoScalingGroups[0].{DesiredCapacity:DesiredCapacity,MinSize:MinSize,MaxSize:MaxSize,Instances:Instances[*].{InstanceId:InstanceId,LifecycleState:LifecycleState}}'"
@@ -342,67 +369,72 @@ watch -n 5 "aws autoscaling describe-auto-scaling-groups \
 pkill -f load_test.sh
 ```
 
-4. Monitor Scaling Events:
-```bash
-# Watch CloudWatch metrics
-aws cloudwatch get-metric-statistics \
-    --namespace AWS/EC2 \
-    --metric-name CPUUtilization \
-    --dimensions Name=AutoScalingGroupName,Value=$ASG_NAME \
-    --start-time $(date -v-5M -u +%Y-%m-%dT%H:%M:%S) \
-    --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-    --period 60 \
-    --statistics Average
-
-# View scaling activities
-aws autoscaling describe-scaling-activities \
-    --auto-scaling-group-name $ASG_NAME
-```
-
 ## Step 7: Clean Up Resources
+
+This step removes all resources to avoid ongoing charges. We'll:
+- Stop any running load tests
+- Terminate EC2 instances
+- Delete resources in the correct order
+- Wait for dependencies to be removed
 
 ```bash
 # First, stop any running load tests
 pkill -f load_test.sh
 
-# Delete Auto Scaling Group
+# Get all EC2 instances in the Auto Scaling Group
+INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+    --auto-scaling-group-names $ASG_NAME \
+    --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+    --output text)
+
+# Terminate all EC2 instances
+if [ ! -z "$INSTANCE_IDS" ]; then
+    echo "Terminating EC2 instances: $INSTANCE_IDS"
+    aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+    
+    # Wait for instances to terminate
+    echo "Waiting for instances to terminate..."
+    aws ec2 wait instance-terminated --instance-ids $INSTANCE_IDS
+fi
+
+# Delete Auto Scaling Group - This removes our EC2 instances
 aws autoscaling delete-auto-scaling-group \
     --auto-scaling-group-name $ASG_NAME \
     --force-delete
 
-# Delete Launch Template
+# Delete Launch Template - This removes our instance configuration
 aws ec2 delete-launch-template \
     --launch-template-id $LAUNCH_TEMPLATE_ID
 
-# Delete ALB Listener first
+# Delete ALB Listener first - Required before deleting the ALB
 aws elbv2 delete-listener \
     --listener-arn $LISTENER_ARN
 
-# Delete ALB
+# Delete ALB - This removes our load balancer
 aws elbv2 delete-load-balancer \
     --load-balancer-arn $ALB_ARN
 
-# Wait for ALB to be deleted
+# Wait for ALB to be deleted - Ensures cleanup is complete
 aws elbv2 wait load-balancers-deleted \
     --load-balancer-arns $ALB_ARN
 
-# Now delete Target Group
+# Now delete Target Group - Can only be deleted after ALB is gone
 aws elbv2 delete-target-group \
     --target-group-arn $TARGET_GROUP_ARN
 
-# Delete NAT Gateway
+# Delete NAT Gateway - This removes our private subnet internet access
 aws ec2 delete-nat-gateway \
     --nat-gateway-id $NAT_GW_ID
 
-# Wait for NAT Gateway to be deleted
+# Wait for NAT Gateway to be deleted - Ensures cleanup is complete
 aws ec2 wait nat-gateway-deleted \
     --nat-gateway-ids $NAT_GW_ID
 
-# Release Elastic IP
+# Release Elastic IP - This frees up our public IP address
 aws ec2 release-address \
     --allocation-id $EIP_ID
 
-# Delete subnets
+# Delete subnets - Remove our network segments
 aws ec2 delete-subnet \
     --subnet-id $PUBLIC_SUBNET_1_ID
 aws ec2 delete-subnet \
@@ -412,20 +444,20 @@ aws ec2 delete-subnet \
 aws ec2 delete-subnet \
     --subnet-id $PRIVATE_SUBNET_2_ID
 
-# Delete route tables
+# Delete route tables - Remove our routing configurations
 aws ec2 delete-route-table \
     --route-table-id $PUBLIC_RT_ID
 aws ec2 delete-route-table \
     --route-table-id $PRIVATE_RT_ID
 
-# Detach and delete Internet Gateway
+# Detach and delete Internet Gateway - Remove internet access
 aws ec2 detach-internet-gateway \
     --internet-gateway-id $IGW_ID \
     --vpc-id $VPC_ID
 aws ec2 delete-internet-gateway \
     --internet-gateway-id $IGW_ID
 
-# Delete VPC
+# Delete VPC - Finally remove our network environment
 aws ec2 delete-vpc \
     --vpc-id $VPC_ID
 ```
