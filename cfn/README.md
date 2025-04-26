@@ -280,8 +280,10 @@ Before deploying, check what parameters are required by your template:
 # List all parameters in the template
 aws cloudformation get-template-summary \
   --template-body file://web-app-stack.yaml \
-  --query "Parameters[].{ParameterKey:ParameterKey,DefaultValue:DefaultValue,Required:not(contains(keys(@), 'DefaultValue'))}" \
+  --query "Parameters[].{ParameterKey:ParameterKey,DefaultValue:DefaultValue}" \
   --output table
+
+# Parameters without DefaultValue are required
 ```
 
 To deploy a new CloudFormation stack:
