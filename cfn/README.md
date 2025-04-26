@@ -324,10 +324,21 @@ aws cloudformation create-stack \
 For deploying the serverless application:
 
 ```bash
+# First, create an S3 bucket that you have access to
+# Replace 'my-deployment-bucket' with a globally unique bucket name
+aws s3 mb s3://my-deployment-bucket-$(aws sts get-caller-identity --query Account --output text)
+
+# Verify you have write permissions to this bucket
+echo "test" > test.txt
+aws s3 cp test.txt s3://my-deployment-bucket-$(aws sts get-caller-identity --query Account --output text)
+rm test.txt
+
 # Package the serverless application (required to upload Lambda code to S3)
+# Replace with your actual bucket name
+BUCKET_NAME="my-deployment-bucket-$(aws sts get-caller-identity --query Account --output text)"
 aws cloudformation package \
   --template-file serverless-app.yaml \
-  --s3-bucket your-deployment-bucket \
+  --s3-bucket $BUCKET_NAME \
   --output-template-file packaged-serverless-app.yaml
 
 # Deploy the packaged serverless application
@@ -337,6 +348,13 @@ aws cloudformation deploy \
   --parameter-overrides Environment=dev \
   --capabilities CAPABILITY_IAM
 ```
+
+> **Note**: If you encounter "Access Denied" errors when packaging the template:
+> 1. Ensure the S3 bucket exists and you created it
+> 2. Verify you have the necessary permissions (s3:PutObject)
+> 3. Check that the Lambda code directories (./lambda/*) exist
+> 
+> For testing without packaging, you can also modify the template to use inline code instead of CodeUri.
 
 ### Monitoring Deployment Progress
 
