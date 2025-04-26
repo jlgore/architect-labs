@@ -274,22 +274,48 @@ aws cloudformation validate-template --template-url https://s3.amazonaws.com/buc
 
 ### Deploying a Stack
 
+Before deploying, check what parameters are required by your template:
+
+```bash
+# List all parameters in the template
+aws cloudformation get-template-summary \
+  --template-body file://web-app-stack.yaml \
+  --query "Parameters[].{ParameterKey:ParameterKey,DefaultValue:DefaultValue,Required:not(contains(keys(@), 'DefaultValue'))}" \
+  --output table
+```
+
 To deploy a new CloudFormation stack:
 
 ```bash
-# Deploy with default parameter values
+# Deploy with all required parameters
 aws cloudformation create-stack \
   --stack-name my-web-app \
   --template-body file://web-app-stack.yaml \
+  --parameters ParameterKey=EnvironmentName,ParameterValue=dev \
+               ParameterKey=KeyName,ParameterValue=YOUR_EC2_KEY_PAIR_NAME \
+               ParameterKey=DBPassword,ParameterValue=YourSecurePassword123 \
   --capabilities CAPABILITY_IAM
+```
 
-# Deploy with custom parameter values
+> **Note:** The `KeyName` parameter requires an existing EC2 key pair. You must create this key pair before deploying:
+> ```bash
+> # Create a new EC2 key pair if you don't have one
+> aws ec2 create-key-pair --key-name MyKeyPair --query 'KeyMaterial' --output text > MyKeyPair.pem
+> chmod 400 MyKeyPair.pem
+> ```
+
+Alternatively, you can modify the template to make KeyName optional by adding a default value or using a condition. Here's how to modify the template for testing purposes:
+
+```bash
+# Create a temporary version of the template without key pair requirement
+sed '/KeyName:/,+2s/^/#/' web-app-stack.yaml > web-app-stack-nokey.yaml
+
+# Now deploy using the modified template
 aws cloudformation create-stack \
   --stack-name my-web-app \
-  --template-body file://web-app-stack.yaml \
-  --parameters ParameterKey=EnvironmentName,ParameterValue=prod \
-               ParameterKey=InstanceType,ParameterValue=t3.small \
-               ParameterKey=DBPassword,ParameterValue=SecurePassword123 \
+  --template-body file://web-app-stack-nokey.yaml \
+  --parameters ParameterKey=EnvironmentName,ParameterValue=dev \
+               ParameterKey=DBPassword,ParameterValue=YourSecurePassword123 \
   --capabilities CAPABILITY_IAM
 ```
 
