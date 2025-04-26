@@ -18,8 +18,6 @@ Parameters:
     AllowedValues:
       - nodejs16.x
       - nodejs18.x
-      - python3.9
-      - python3.10
     Description: Lambda function runtime
 
 Mappings:
@@ -55,112 +53,16 @@ Resources:
           ThrottlingBurstLimit: 10
           ThrottlingRateLimit: 5
 
-  # Lambda Functions
-  GetItemsFunction:
+  # Single Lambda Function using Hono
+  HonoApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${Environment}-get-items"
-      Handler: index.getItems
+      FunctionName: !Sub "${Environment}-hono-api"
+      Handler: index.handler
       Runtime: !Ref LambdaRuntime
-      CodeUri: ./lambda/get-items/
+      CodeUri: ./lambda/hono-api/
       Timeout: 30
-      MemorySize: 128
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref ItemsTable
-          ENVIRONMENT: !Ref Environment
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref ItemsTable
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items
-            Method: GET
-
-  CreateItemFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "${Environment}-create-item"
-      Handler: index.createItem
-      Runtime: !Ref LambdaRuntime
-      CodeUri: ./lambda/create-item/
-      Timeout: 30
-      MemorySize: 128
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref ItemsTable
-          ENVIRONMENT: !Ref Environment
-      Policies:
-        - DynamoDBWritePolicy:
-            TableName: !Ref ItemsTable
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items
-            Method: POST
-
-  GetItemByIdFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "${Environment}-get-item-by-id"
-      Handler: index.getItemById
-      Runtime: !Ref LambdaRuntime
-      CodeUri: ./lambda/get-item-by-id/
-      Timeout: 30
-      MemorySize: 128
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref ItemsTable
-          ENVIRONMENT: !Ref Environment
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref ItemsTable
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items/{id}
-            Method: GET
-
-  UpdateItemFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "${Environment}-update-item"
-      Handler: index.updateItem
-      Runtime: !Ref LambdaRuntime
-      CodeUri: ./lambda/update-item/
-      Timeout: 30
-      MemorySize: 128
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref ItemsTable
-          ENVIRONMENT: !Ref Environment
-      Policies:
-        - DynamoDBWritePolicy:
-            TableName: !Ref ItemsTable
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items/{id}
-            Method: PUT
-
-  DeleteItemFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "${Environment}-delete-item"
-      Handler: index.deleteItem
-      Runtime: !Ref LambdaRuntime
-      CodeUri: ./lambda/delete-item/
-      Timeout: 30
-      MemorySize: 128
+      MemorySize: 256
       Environment:
         Variables:
           TABLE_NAME: !Ref ItemsTable
@@ -168,13 +70,51 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ItemsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt NotificationTopic.TopicName
       Events:
-        ApiEvent:
+        GetItems:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /items
+            Method: GET
+        CreateItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /items
+            Method: POST
+        GetItemById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /items/{id}
+            Method: GET
+        UpdateItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /items/{id}
+            Method: PUT
+        DeleteItem:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
             Path: /items/{id}
             Method: DELETE
+        Options:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /items
+            Method: OPTIONS
+        OptionsWithId:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /items/{id}
+            Method: OPTIONS
 
   # DynamoDB Table
   ItemsTable:
@@ -235,7 +175,7 @@ Resources:
     Properties:
       Protocol: email
       TopicArn: !Ref NotificationTopic
-      Endpoint: !Sub "admin@${AWS::AccountId}.example.com"
+      Endpoint: !Sub "admin-${AWS::AccountId}@example.com"
 
   # Cognito User Pool for API authentication
   UserPool:
