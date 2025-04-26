@@ -1,12 +1,45 @@
 const { Hono } = require('hono');
 const { handle } = require('@hono/aws-lambda');
-const AWS = require('aws-sdk');
+const mysql = require('mysql2/promise');
 const { ulid } = require('ulid');
 
-// Initialize DynamoDB client
-const dynamoDB = new AWS.DynamoDB.DocumentClient();
-const TABLE_NAME = process.env.TABLE_NAME;
-const ENVIRONMENT = process.env.ENVIRONMENT;
+// Database configuration from environment variables
+const dbConfig = {
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+};
+
+// Create MySQL connection pool
+let pool;
+
+// Initialize database
+async function initializeDb() {
+  if (!pool) {
+    pool = mysql.createPool(dbConfig);
+    
+    // Create items table if it doesn't exist
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS items (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        price DECIMAL(10, 2),
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        data JSON
+      )
+    `);
+    
+    console.log('Database initialized');
+  }
+  return pool;
+}
 
 // Create Hono app
 const app = new Hono();
@@ -38,33 +71,30 @@ app.use('*', async (c, next) => {
 
 // Get all items
 app.get('/items', async (c) => {
-  const params = { TableName: TABLE_NAME };
-  const result = await dynamoDB.scan(params).promise();
+  const db = await initializeDb();
+  
+  const [rows] = await db.execute('SELECT * FROM items');
   
   return c.json({ 
-    items: result.Items,
-    environment: ENVIRONMENT
+    items: rows,
+    environment: process.env.ENVIRONMENT
   });
 });
 
 // Get item by ID
 app.get('/items/:id', async (c) => {
   const id = c.req.param('id');
+  const db = await initializeDb();
   
-  const params = { 
-    TableName: TABLE_NAME, 
-    Key: { id } 
-  };
+  const [rows] = await db.execute('SELECT * FROM items WHERE id = ?', [id]);
   
-  const result = await dynamoDB.get(params).promise();
-  
-  if (!result.Item) {
+  if (rows.length === 0) {
     return c.json({ message: 'Item not found' }, 404);
   }
   
   return c.json({ 
-    item: result.Item,
-    environment: ENVIRONMENT
+    item: rows[0],
+    environment: process.env.ENVIRONMENT
   });
 });
 
@@ -76,24 +106,35 @@ app.post('/items', async (c) => {
     return c.json({ message: 'Request body is required' }, 400);
   }
   
-  const item = {
-    id: ulid(),
-    ...body,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
+  const db = await initializeDb();
   
-  const params = {
-    TableName: TABLE_NAME,
-    Item: item
-  };
+  // Create item with a new ID
+  const id = ulid();
+  const now = new Date().toISOString();
   
-  await dynamoDB.put(params).promise();
+  // Extract known fields from body
+  const { name, description, price } = body;
+  
+  // Store additional fields in JSON data column
+  const additionalData = { ...body };
+  delete additionalData.name;
+  delete additionalData.description;
+  delete additionalData.price;
+  
+  const dataJSON = JSON.stringify(additionalData);
+  
+  await db.execute(
+    'INSERT INTO items (id, name, description, price, createdAt, updatedAt, data) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, name, description, price, now, now, dataJSON]
+  );
+  
+  // Get the created item
+  const [rows] = await db.execute('SELECT * FROM items WHERE id = ?', [id]);
   
   return c.json({ 
     message: 'Item created successfully',
-    item,
-    environment: ENVIRONMENT
+    item: rows[0],
+    environment: process.env.ENVIRONMENT
   }, 201);
 });
 
@@ -106,87 +147,71 @@ app.put('/items/:id', async (c) => {
     return c.json({ message: 'Request body is required' }, 400);
   }
   
-  // First check if item exists
-  const getParams = {
-    TableName: TABLE_NAME,
-    Key: { id }
-  };
+  const db = await initializeDb();
   
-  const existingItem = await dynamoDB.get(getParams).promise();
+  // Check if item exists
+  const [existingRows] = await db.execute('SELECT * FROM items WHERE id = ?', [id]);
   
-  if (!existingItem.Item) {
+  if (existingRows.length === 0) {
     return c.json({ message: 'Item not found' }, 404);
   }
   
+  // Extract known fields from body
+  const { name, description, price } = body;
+  
+  // Store additional fields in JSON data column
+  const additionalData = { ...body };
+  delete additionalData.name;
+  delete additionalData.description;
+  delete additionalData.price;
+  
+  const dataJSON = JSON.stringify(additionalData);
+  
   // Update the item
-  const updateExpressions = [];
-  const expressionAttributeNames = {};
-  const expressionAttributeValues = {};
+  await db.execute(
+    'UPDATE items SET name = ?, description = ?, price = ?, data = ? WHERE id = ?',
+    [name, description, price, dataJSON, id]
+  );
   
-  Object.keys(body).forEach(key => {
-    if (key !== 'id') { // Prevent updating the primary key
-      updateExpressions.push(`#${key} = :${key}`);
-      expressionAttributeNames[`#${key}`] = key;
-      expressionAttributeValues[`:${key}`] = body[key];
-    }
-  });
-  
-  // Add updatedAt timestamp
-  updateExpressions.push('#updatedAt = :updatedAt');
-  expressionAttributeNames['#updatedAt'] = 'updatedAt';
-  expressionAttributeValues[':updatedAt'] = new Date().toISOString();
-  
-  const updateParams = {
-    TableName: TABLE_NAME,
-    Key: { id },
-    UpdateExpression: `SET ${updateExpressions.join(', ')}`,
-    ExpressionAttributeNames: expressionAttributeNames,
-    ExpressionAttributeValues: expressionAttributeValues,
-    ReturnValues: 'ALL_NEW'
-  };
-  
-  const result = await dynamoDB.update(updateParams).promise();
+  // Get the updated item
+  const [rows] = await db.execute('SELECT * FROM items WHERE id = ?', [id]);
   
   return c.json({ 
     message: 'Item updated successfully',
-    item: result.Attributes,
-    environment: ENVIRONMENT
+    item: rows[0],
+    environment: process.env.ENVIRONMENT
   });
 });
 
 // Delete item
 app.delete('/items/:id', async (c) => {
   const id = c.req.param('id');
+  const db = await initializeDb();
   
-  // First check if item exists
-  const getParams = {
-    TableName: TABLE_NAME,
-    Key: { id }
-  };
+  // Check if item exists
+  const [existingRows] = await db.execute('SELECT * FROM items WHERE id = ?', [id]);
   
-  const existingItem = await dynamoDB.get(getParams).promise();
-  
-  if (!existingItem.Item) {
+  if (existingRows.length === 0) {
     return c.json({ message: 'Item not found' }, 404);
   }
   
-  const deleteParams = {
-    TableName: TABLE_NAME,
-    Key: { id },
-    ReturnValues: 'ALL_OLD'
-  };
+  const deletedItem = existingRows[0];
   
-  const result = await dynamoDB.delete(deleteParams).promise();
+  // Delete the item
+  await db.execute('DELETE FROM items WHERE id = ?', [id]);
   
   return c.json({ 
     message: 'Item deleted successfully',
-    item: result.Attributes,
-    environment: ENVIRONMENT
+    item: deletedItem,
+    environment: process.env.ENVIRONMENT
   });
 });
 
 // The Lambda handler
 exports.handler = async (event, context) => {
+  // Enable connection reuse in Lambda
+  context.callbackWaitsForEmptyEventLoop = false;
+  
   console.log('Received event:', JSON.stringify(event, null, 2));
   return await handle(app, event, context);
 }; 

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless API with Lambda, API Gateway, and DynamoDB
+Description: Serverless API with Lambda, API Gateway, and RDS
 
 Parameters:
   Environment:
@@ -20,17 +20,20 @@ Parameters:
       - nodejs18.x
     Description: Lambda function runtime
 
-Mappings:
-  EnvironmentConfig:
-    dev:
-      ReadCapacity: 1
-      WriteCapacity: 1
-    test:
-      ReadCapacity: 2
-      WriteCapacity: 2
-    prod:
-      ReadCapacity: 5
-      WriteCapacity: 5
+  DBUsername:
+    Type: String
+    Default: dbadmin
+    Description: Username for the database
+    NoEcho: true
+    
+  DBPassword:
+    Type: String
+    Description: Password for the database
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: "[a-zA-Z0-9]*"
+    ConstraintDescription: must contain only alphanumeric characters
 
 Resources:
   # API Gateway REST API
@@ -60,11 +63,12 @@ Resources:
       MemorySize: 256
       Environment:
         Variables:
-          TABLE_NAME: !Ref ItemsTable
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: appdatabase
+          DB_USER: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
           ENVIRONMENT: !Ref Environment
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ItemsTable
       Events:
         GetItems:
           Type: Api
@@ -109,21 +113,31 @@ Resources:
             Path: /items/{id}
             Method: OPTIONS
 
-  # DynamoDB Table
-  ItemsTable:
-    Type: AWS::DynamoDB::Table
+  # RDS Database
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      TableName: !Sub "${Environment}-items"
-      BillingMode: PROVISIONED
-      ProvisionedThroughput:
-        ReadCapacityUnits: !FindInMap [EnvironmentConfig, !Ref Environment, ReadCapacity]
-        WriteCapacityUnits: !FindInMap [EnvironmentConfig, !Ref Environment, WriteCapacity]
-      AttributeDefinitions:
-        - AttributeName: id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH
+      GroupDescription: Enable database access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: appdatabase
+      Engine: mysql
+      EngineVersion: 8.0.28
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp2
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      PubliclyAccessible: true
+      VPCSecurityGroups:
+        - !GetAtt DatabaseSecurityGroup.GroupId
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -138,15 +152,21 @@ Outputs:
     Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
     Export:
       Name: !Sub "${Environment}-ApiEndpoint"
-
-  ItemsTableName:
-    Description: DynamoDB Items Table name
-    Value: !Ref ItemsTable
-    Export:
-      Name: !Sub "${Environment}-ItemsTableName"
       
   HonoApiFunctionName:
     Description: Hono API Lambda function name
     Value: !Ref HonoApiFunction
     Export:
-      Name: !Sub "${Environment}-HonoApiFunction" 
+      Name: !Sub "${Environment}-HonoApiFunction"
+      
+  DatabaseEndpoint:
+    Description: RDS Database endpoint
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Sub "${Environment}-DatabaseEndpoint"
+      
+  DatabasePort:
+    Description: RDS Database port
+    Value: !GetAtt Database.Endpoint.Port
+    Export:
+      Name: !Sub "${Environment}-DatabasePort" 
