@@ -382,49 +382,11 @@ API_URL=$(aws cloudformation describe-stacks \
 
 echo "API URL: $API_URL"
 
-# For the Hono-based implementation, you need to authenticate first
-# Get Cognito details
-USER_POOL_ID=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" \
-  --output text)
-
-CLIENT_ID=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" \
-  --output text)
-
-# Create a test user (you only need to do this once)
-USERNAME="test@example.com"
-PASSWORD="Test123!"
-aws cognito-idp admin-create-user \
-  --user-pool-id $USER_POOL_ID \
-  --username $USERNAME \
-  --temporary-password $PASSWORD \
-  --message-action SUPPRESS
-
-# Force password change (skip if using an existing user)
-aws cognito-idp admin-set-user-password \
-  --user-pool-id $USER_POOL_ID \
-  --username $USERNAME \
-  --password $PASSWORD \
-  --permanent
-
-# Get authentication token
-AUTH_RESULT=$(aws cognito-idp initiate-auth \
-  --auth-flow USER_PASSWORD_AUTH \
-  --client-id $CLIENT_ID \
-  --auth-parameters USERNAME=$USERNAME,PASSWORD=$PASSWORD)
-
-ID_TOKEN=$(echo $AUTH_RESULT | jq -r '.AuthenticationResult.IdToken')
-echo "ID_TOKEN=$ID_TOKEN"
-
 # Test API endpoints:
 
 # 1. Create an item
 curl -X POST $API_URL/items \
   -H "Content-Type: application/json" \
-  -H "Authorization: $ID_TOKEN" \
   -d '{
     "name": "Test Item",
     "description": "This is a test item",
@@ -432,18 +394,15 @@ curl -X POST $API_URL/items \
   }'
 
 # 2. Get all items
-curl -X GET $API_URL/items \
-  -H "Authorization: $ID_TOKEN"
+curl -X GET $API_URL/items
 
 # 3. Get item by ID (save an ID from previous response)
 ITEM_ID="your-item-id"
-curl -X GET $API_URL/items/$ITEM_ID \
-  -H "Authorization: $ID_TOKEN"
+curl -X GET $API_URL/items/$ITEM_ID
 
 # 4. Update an item
 curl -X PUT $API_URL/items/$ITEM_ID \
   -H "Content-Type: application/json" \
-  -H "Authorization: $ID_TOKEN" \
   -d '{
     "name": "Updated Item",
     "description": "This item has been updated",
@@ -451,8 +410,7 @@ curl -X PUT $API_URL/items/$ITEM_ID \
   }'
 
 # 5. Delete an item
-curl -X DELETE $API_URL/items/$ITEM_ID \
-  -H "Authorization: $ID_TOKEN"
+curl -X DELETE $API_URL/items/$ITEM_ID
 
 # View Lambda function logs
 FUNCTION_NAME=$(aws cloudformation describe-stacks \
@@ -616,3 +574,77 @@ aws cloudformation describe-stack-events \
 ```
 
 CloudFormation is a powerful service that simplifies infrastructure management. This guide covers the fundamentals, but AWS documentation provides comprehensive details on all supported resources and features.
+
+### Troubleshooting AWS Academy Sandbox Limitations
+
+When working in the AWS Academy Sandbox environment, you might encounter limitations with certain AWS services. This section provides guidance on common issues:
+
+1. **Service Restrictions**: The sandbox only allows specific services. Refer to the sandbox documentation for the full list of available services.
+
+2. **Permission Errors**: If you see "Access Denied" errors, it's likely that the operation is restricted in the sandbox environment.
+
+3. **Template Simplification**: If your CloudFormation stack fails to deploy, try simplifying it to use only the core services explicitly allowed in the sandbox.
+
+For the serverless application:
+
+```bash
+# Get all stack outputs
+aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs" \
+  --output table
+
+# Get just the API endpoint URL
+API_URL=$(aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+  --output text)
+
+echo "API URL: $API_URL"
+
+# Test API endpoints:
+
+# 1. Create an item
+curl -X POST $API_URL/items \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Item",
+    "description": "This is a test item",
+    "price": 19.99
+  }'
+
+# 2. Get all items
+curl -X GET $API_URL/items
+
+# 3. Get item by ID (save an ID from previous response)
+ITEM_ID="your-item-id"
+curl -X GET $API_URL/items/$ITEM_ID
+
+# 4. Update an item
+curl -X PUT $API_URL/items/$ITEM_ID \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Item",
+    "description": "This item has been updated",
+    "price": 29.99
+  }'
+
+# 5. Delete an item
+curl -X DELETE $API_URL/items/$ITEM_ID
+
+# View Lambda function logs
+FUNCTION_NAME=$(aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs[?OutputKey=='HonoApiFunctionName'].OutputValue" \
+  --output text || echo "dev-hono-api")
+
+aws logs get-log-events \
+  --log-group-name /aws/lambda/$FUNCTION_NAME \
+  --log-stream-name $(aws logs describe-log-streams \
+    --log-group-name /aws/lambda/$FUNCTION_NAME \
+    --order-by LastEventTime \
+    --descending \
+    --limit 1 \
+    --query 'logStreams[0].logStreamName' \
+    --output text)
+```

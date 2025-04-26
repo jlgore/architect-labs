@@ -16,7 +16,7 @@ app.use('*', async (c, next) => {
   await next();
   c.header('Access-Control-Allow-Origin', '*');
   c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key, X-Amz-Date');
+  c.header('Access-Control-Allow-Headers', 'Content-Type, X-Api-Key, X-Amz-Date');
   
   if (c.req.method === 'OPTIONS') {
     return c.status(204);
