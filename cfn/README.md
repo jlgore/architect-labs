@@ -342,10 +342,13 @@ aws cloudformation package \
   --output-template-file packaged-serverless-app.yaml
 
 # Deploy the packaged serverless application
+# Don't forget to include the required DBPassword parameter
 aws cloudformation deploy \
   --template-file packaged-serverless-app.yaml \
   --stack-name my-serverless-app \
-  --parameter-overrides Environment=dev \
+  --parameter-overrides \
+      Environment=dev \
+      DBPassword=MySecurePassword123 \
   --capabilities CAPABILITY_IAM
 ```
 
