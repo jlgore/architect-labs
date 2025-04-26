@@ -356,6 +356,121 @@ aws cloudformation deploy \
 > 
 > For testing without packaging, you can also modify the template to use inline code instead of CodeUri.
 
+#### Understanding the Hono-based Serverless API
+
+The consolidated serverless application uses a single Lambda function powered by the [Hono](https://hono.dev/) framework to handle all API operations. This approach offers several advantages:
+
+- **Simplified deployment**: One Lambda function handles all routes
+- **Reduced cold starts**: Single function means fewer cold starts
+- **Easier maintenance**: All API logic in one codebase
+- **Modern API framework**: Hono provides a fast, lightweight HTTP framework
+
+For the serverless application:
+
+```bash
+# Get all stack outputs
+aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs" \
+  --output table
+
+# Get just the API endpoint URL
+API_URL=$(aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+  --output text)
+
+echo "API URL: $API_URL"
+
+# For the Hono-based implementation, you need to authenticate first
+# Get Cognito details
+USER_POOL_ID=$(aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" \
+  --output text)
+
+CLIENT_ID=$(aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" \
+  --output text)
+
+# Create a test user (you only need to do this once)
+USERNAME="test@example.com"
+PASSWORD="Test123!"
+aws cognito-idp admin-create-user \
+  --user-pool-id $USER_POOL_ID \
+  --username $USERNAME \
+  --temporary-password $PASSWORD \
+  --message-action SUPPRESS
+
+# Force password change (skip if using an existing user)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $USER_POOL_ID \
+  --username $USERNAME \
+  --password $PASSWORD \
+  --permanent
+
+# Get authentication token
+AUTH_RESULT=$(aws cognito-idp initiate-auth \
+  --auth-flow USER_PASSWORD_AUTH \
+  --client-id $CLIENT_ID \
+  --auth-parameters USERNAME=$USERNAME,PASSWORD=$PASSWORD)
+
+ID_TOKEN=$(echo $AUTH_RESULT | jq -r '.AuthenticationResult.IdToken')
+echo "ID_TOKEN=$ID_TOKEN"
+
+# Test API endpoints:
+
+# 1. Create an item
+curl -X POST $API_URL/items \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $ID_TOKEN" \
+  -d '{
+    "name": "Test Item",
+    "description": "This is a test item",
+    "price": 19.99
+  }'
+
+# 2. Get all items
+curl -X GET $API_URL/items \
+  -H "Authorization: $ID_TOKEN"
+
+# 3. Get item by ID (save an ID from previous response)
+ITEM_ID="your-item-id"
+curl -X GET $API_URL/items/$ITEM_ID \
+  -H "Authorization: $ID_TOKEN"
+
+# 4. Update an item
+curl -X PUT $API_URL/items/$ITEM_ID \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $ID_TOKEN" \
+  -d '{
+    "name": "Updated Item",
+    "description": "This item has been updated",
+    "price": 29.99
+  }'
+
+# 5. Delete an item
+curl -X DELETE $API_URL/items/$ITEM_ID \
+  -H "Authorization: $ID_TOKEN"
+
+# View Lambda function logs
+FUNCTION_NAME=$(aws cloudformation describe-stacks \
+  --stack-name my-serverless-app \
+  --query "Stacks[0].Outputs[?OutputKey=='HonoApiFunctionName'].OutputValue" \
+  --output text || echo "dev-hono-api")
+
+aws logs get-log-events \
+  --log-group-name /aws/lambda/$FUNCTION_NAME \
+  --log-stream-name $(aws logs describe-log-streams \
+    --log-group-name /aws/lambda/$FUNCTION_NAME \
+    --order-by LastEventTime \
+    --descending \
+    --limit 1 \
+    --query 'logStreams[0].logStreamName' \
+    --output text)
+```
+
 ### Monitoring Deployment Progress
 
 To check the status of a stack deployment:
