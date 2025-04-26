@@ -1,5 +1,4 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
 Description: Serverless API with Lambda, API Gateway, and RDS
 
 Parameters:
@@ -19,7 +18,7 @@ Parameters:
       - nodejs16.x
       - nodejs18.x
     Description: Lambda function runtime
-
+    
   DBUsername:
     Type: String
     Default: dbadmin
@@ -38,92 +37,51 @@ Parameters:
 Resources:
   # API Gateway REST API
   ApiGateway:
-    Type: AWS::Serverless::Api
+    Type: AWS::ApiGateway::RestApi
     Properties:
+      Name: !Sub "${Environment}-items-api"
+      Description: API for managing items
+  
+  # API Gateway Resources and Methods
+  ItemsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: "items"
+  
+  GetItemsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ItemsResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: HTTP
+        IntegrationHttpMethod: GET
+        Uri: !Sub "http://${Database.Endpoint.Address}:${Database.Endpoint.Port}/appdatabase/items"
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: '{"items": []}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+  
+  # API Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: GetItemsMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
       StageName: !Ref Environment
-      Cors:
-        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,X-Api-Key'"
-        AllowOrigin: "'*'"
-      MethodSettings:
-        - ResourcePath: '/*'
-          HttpMethod: '*'
-          ThrottlingBurstLimit: 10
-          ThrottlingRateLimit: 5
-
-  # Single Lambda Function using Hono
-  HonoApiFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "${Environment}-hono-api"
-      Handler: index.handler
-      Runtime: !Ref LambdaRuntime
-      CodeUri: ./lambda/hono-api/
-      Timeout: 30
-      MemorySize: 256
-      Environment:
-        Variables:
-          DB_HOST: !GetAtt Database.Endpoint.Address
-          DB_PORT: !GetAtt Database.Endpoint.Port
-          DB_NAME: appdatabase
-          DB_USER: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          ENVIRONMENT: !Ref Environment
-      Events:
-        GetItems:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items
-            Method: GET
-        CreateItem:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items
-            Method: POST
-        GetItemById:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items/{id}
-            Method: GET
-        UpdateItem:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items/{id}
-            Method: PUT
-        DeleteItem:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items/{id}
-            Method: DELETE
-        Options:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items
-            Method: OPTIONS
-        OptionsWithId:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /items/{id}
-            Method: OPTIONS
-
+  
   # RDS Database
-  DatabaseSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Enable database access
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          CidrIp: 0.0.0.0/0
-
   Database:
     Type: AWS::RDS::DBInstance
     Properties:
@@ -136,15 +94,9 @@ Resources:
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
       PubliclyAccessible: true
-      VPCSecurityGroups:
-        - !GetAtt DatabaseSecurityGroup.GroupId
       Tags:
         - Key: Environment
           Value: !Ref Environment
-
-# Conditions for conditional resource creation
-Conditions:
-  IsProd: !Equals [!Ref Environment, "prod"]
 
 Outputs:
   ApiEndpoint:
@@ -152,12 +104,6 @@ Outputs:
     Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
     Export:
       Name: !Sub "${Environment}-ApiEndpoint"
-      
-  HonoApiFunctionName:
-    Description: Hono API Lambda function name
-    Value: !Ref HonoApiFunction
-    Export:
-      Name: !Sub "${Environment}-HonoApiFunction"
       
   DatabaseEndpoint:
     Description: RDS Database endpoint
