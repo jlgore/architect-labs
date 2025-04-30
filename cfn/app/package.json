@@ -1,0 +1,14 @@
+{
+  "name": "cloudmart",
+  "version": "1.0.0",
+  "description": "CloudMart - A demo e-commerce application for AWS CloudFormation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^2.3.3",
+    "cors": "^2.8.5"
+  }
+} 

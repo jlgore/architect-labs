@@ -260,6 +260,20 @@ cd architect-labs-main/cfn
 
 2. Ensure your AWS user has the necessary permissions to create and manage CloudFormation stacks and their resources.
 
+### Creating an EC2 Key Pair for SSH Access
+
+Before deploying any stacks that include EC2 instances, you need to create a key pair for SSH access:
+
+```bash
+# Create a new key pair
+aws ec2 create-key-pair --key-name MyKeyPair --query 'KeyMaterial' --output text > MyKeyPair.pem
+
+# Set the right permissions
+chmod 400 MyKeyPair.pem
+```
+
+This key pair will be referenced in your CloudFormation templates to allow SSH access to your EC2 instances.
+
 ### Template Validation
 
 Always validate your templates before deployment:
@@ -272,7 +286,7 @@ aws cloudformation validate-template --template-body file://web-app-stack.yaml
 aws cloudformation validate-template --template-url https://s3.amazonaws.com/bucket-name/web-app-stack.yaml
 ```
 
-### Deploying a Stack
+### Deploying the Web Application Stack
 
 Before deploying, check what parameters are required by your template:
 
@@ -282,11 +296,9 @@ aws cloudformation get-template-summary \
   --template-body file://web-app-stack.yaml \
   --query "Parameters[].{ParameterKey:ParameterKey,DefaultValue:DefaultValue}" \
   --output table
-
-# Parameters without DefaultValue are required
 ```
 
-To deploy a new CloudFormation stack:
+To deploy the web application stack:
 
 ```bash
 # Deploy with all required parameters
@@ -294,32 +306,91 @@ aws cloudformation create-stack \
   --stack-name my-web-app \
   --template-body file://web-app-stack.yaml \
   --parameters ParameterKey=EnvironmentName,ParameterValue=dev \
-               ParameterKey=KeyName,ParameterValue=YOUR_EC2_KEY_PAIR_NAME \
-               ParameterKey=DBPassword,ParameterValue=YourSecurePassword123 \
-  --capabilities CAPABILITY_IAM
+               ParameterKey=KeyName,ParameterValue=MyKeyPair \
+               ParameterKey=DBPassword,ParameterValue=YourSecurePassword123
+
+# Check deployment status
+aws cloudformation describe-stacks --stack-name my-web-app --query 'Stacks[0].StackStatus'
 ```
 
-> **Note:** The `KeyName` parameter requires an existing EC2 key pair. You must create this key pair before deploying:
-> ```bash
-> # Create a new EC2 key pair if you don't have one
-> aws ec2 create-key-pair --key-name MyKeyPair --query 'KeyMaterial' --output text > MyKeyPair.pem
-> chmod 400 MyKeyPair.pem
-> ```
+### Connecting to EC2 Instances for Troubleshooting
 
-Alternatively, you can modify the template to make KeyName optional by adding a default value or using a condition. Here's how to modify the template for testing purposes:
+The web application deploys EC2 instances in private subnets for security. To connect to these instances, you can use either a bastion host or the EC2 Instance Connect Endpoint.
+
+#### Setting Up SSH Agent for Key Forwarding
+
+To connect to private instances through the bastion host, you need to set up SSH agent forwarding:
 
 ```bash
-# Create a temporary version of the template without key pair requirement
-sed '/KeyName:/,+2s/^/#/' web-app-stack.yaml > web-app-stack-nokey.yaml
+# Start the SSH agent
+eval $(ssh-agent -s)
 
-# Now deploy using the modified template
-aws cloudformation create-stack \
-  --stack-name my-web-app \
-  --template-body file://web-app-stack-nokey.yaml \
-  --parameters ParameterKey=EnvironmentName,ParameterValue=dev \
-               ParameterKey=DBPassword,ParameterValue=YourSecurePassword123 \
-  --capabilities CAPABILITY_IAM
+# Add your key to the agent
+ssh-add MyKeyPair.pem
 ```
+
+#### Connecting to the Bastion Host
+
+```bash
+# Get the bastion host's public IP
+BASTION_IP=$(aws cloudformation describe-stacks --stack-name my-web-app --query "Stacks[0].Outputs[?OutputKey=='BastionHostPublicIP'].OutputValue" --output text)
+
+# Connect with agent forwarding enabled
+ssh -A ec2-user@$BASTION_IP
+```
+
+#### Connecting to Private Web Server Instances
+
+Once connected to the bastion host, you can SSH to private instances without needing to copy the key:
+
+```bash
+# From the bastion, find the private IP of your web servers
+aws ec2 describe-instances --filters "Name=tag:Name,Values=dev-WebServer*" --query "Reservations[*].Instances[*].[InstanceId,PrivateIpAddress]" --output table
+
+# Connect to a web server instance
+ssh ec2-user@<private-ip-address>
+```
+
+#### Alternative: Using EC2 Instance Connect Endpoint
+
+You can also connect directly from your local machine to private instances using the EC2 Instance Connect Endpoint:
+
+```bash
+# Find your instance ID
+aws ec2 describe-instances --filters "Name=tag:Name,Values=dev-WebServer*" --query "Reservations[*].Instances[*].[InstanceId,PrivateIpAddress]" --output table
+
+# Connect directly using the endpoint
+aws ec2-instance-connect-endpoint ssh --instance-id i-xxxxxxxxxx --os-user ec2-user
+```
+
+### Troubleshooting Web Server Issues
+
+Once connected to a web server, you can troubleshoot issues like 502 Bad Gateway errors:
+
+```bash
+# Check if Apache is running
+sudo systemctl status httpd
+
+# Check Apache error logs
+sudo tail -50 /var/log/httpd/error_log
+
+# Check Apache access logs
+sudo tail -50 /var/log/httpd/access_log
+
+# Test the health endpoint locally
+curl http://localhost/health.php
+
+# Test database connectivity
+curl http://localhost/db-test.php
+```
+
+If Apache is not running, you can start it:
+```bash
+sudo systemctl start httpd
+sudo systemctl enable httpd
+```
+
+### Deploying a Serverless Stack
 
 For deploying the serverless application:
 
@@ -350,86 +421,6 @@ aws cloudformation deploy \
       Environment=dev \
       DBPassword=MySecurePassword123 \
   --capabilities CAPABILITY_IAM
-```
-
-> **Note**: If you encounter "Access Denied" errors when packaging the template:
-> 1. Ensure the S3 bucket exists and you created it
-> 2. Verify you have the necessary permissions (s3:PutObject)
-> 3. Check that the Lambda code directories (./lambda/*) exist
-> 
-> For testing without packaging, you can also modify the template to use inline code instead of CodeUri.
-
-#### Understanding the Hono-based Serverless API
-
-The consolidated serverless application uses a single Lambda function powered by the [Hono](https://hono.dev/) framework to handle all API operations. This approach offers several advantages:
-
-- **Simplified deployment**: One Lambda function handles all routes
-- **Reduced cold starts**: Single function means fewer cold starts
-- **Easier maintenance**: All API logic in one codebase
-- **Modern API framework**: Hono provides a fast, lightweight HTTP framework
-
-For the serverless application:
-
-```bash
-# Get all stack outputs
-aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs" \
-  --output table
-
-# Get just the API endpoint URL
-API_URL=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
-  --output text)
-
-echo "API URL: $API_URL"
-
-# Test API endpoints:
-
-# 1. Create an item
-curl -X POST $API_URL/items \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Test Item",
-    "description": "This is a test item",
-    "price": 19.99
-  }'
-
-# 2. Get all items
-curl -X GET $API_URL/items
-
-# 3. Get item by ID (save an ID from previous response)
-ITEM_ID="your-item-id"
-curl -X GET $API_URL/items/$ITEM_ID
-
-# 4. Update an item
-curl -X PUT $API_URL/items/$ITEM_ID \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Updated Item",
-    "description": "This item has been updated",
-    "price": 29.99
-  }'
-
-# 5. Delete an item
-curl -X DELETE $API_URL/items/$ITEM_ID
-
-# View Lambda function logs
-FUNCTION_NAME=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='HonoApiFunctionName'].OutputValue" \
-  --output text || echo "dev-hono-api")
-
-aws logs get-log-events \
-  --log-group-name /aws/lambda/$FUNCTION_NAME \
-  --log-stream-name $(aws logs describe-log-streams \
-    --log-group-name /aws/lambda/$FUNCTION_NAME \
-    --order-by LastEventTime \
-    --descending \
-    --limit 1 \
-    --query 'logStreams[0].logStreamName' \
-    --output text)
 ```
 
 ### Monitoring Deployment Progress
@@ -527,27 +518,6 @@ BUCKET_NAME=$(aws cloudformation describe-stacks \
 aws s3 ls s3://$BUCKET_NAME/
 ```
 
-For the serverless application:
-
-```bash
-# Invoke a Lambda function
-FUNCTION_NAME=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='GetItemsFunctionName'].OutputValue" \
-  --output text)
-aws lambda invoke \
-  --function-name $FUNCTION_NAME \
-  --payload '{}' \
-  response.json
-
-# Get API Gateway URL
-API_URL=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
-  --output text)
-curl -X GET $API_URL/items
-```
-
 ### Deleting a Stack
 
 When you're done with your resources, delete the stack:
@@ -576,6 +546,19 @@ aws cloudformation describe-stack-events \
   --query "sort_by(StackEvents, &Timestamp)"
 ```
 
+#### Common Issues and Solutions
+
+1. **502 Bad Gateway from ALB**
+   - Check if Apache is running on web server instances
+   - Verify security groups allow traffic between ALB and EC2 instances
+   - Check database connectivity works properly
+   - Examine detailed logs in `/var/log/httpd/`
+
+2. **Instance Connect Issues**
+   - Make sure the EC2 Instance Connect Endpoint is properly configured
+   - Verify security groups allow SSH traffic
+   - Check that the instance is running
+
 CloudFormation is a powerful service that simplifies infrastructure management. This guide covers the fundamentals, but AWS documentation provides comprehensive details on all supported resources and features.
 
 ### Troubleshooting AWS Academy Sandbox Limitations
@@ -587,67 +570,3 @@ When working in the AWS Academy Sandbox environment, you might encounter limitat
 2. **Permission Errors**: If you see "Access Denied" errors, it's likely that the operation is restricted in the sandbox environment.
 
 3. **Template Simplification**: If your CloudFormation stack fails to deploy, try simplifying it to use only the core services explicitly allowed in the sandbox.
-
-For the serverless application:
-
-```bash
-# Get all stack outputs
-aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs" \
-  --output table
-
-# Get just the API endpoint URL
-API_URL=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
-  --output text)
-
-echo "API URL: $API_URL"
-
-# Test API endpoints:
-
-# 1. Create an item
-curl -X POST $API_URL/items \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Test Item",
-    "description": "This is a test item",
-    "price": 19.99
-  }'
-
-# 2. Get all items
-curl -X GET $API_URL/items
-
-# 3. Get item by ID (save an ID from previous response)
-ITEM_ID="your-item-id"
-curl -X GET $API_URL/items/$ITEM_ID
-
-# 4. Update an item
-curl -X PUT $API_URL/items/$ITEM_ID \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Updated Item",
-    "description": "This item has been updated",
-    "price": 29.99
-  }'
-
-# 5. Delete an item
-curl -X DELETE $API_URL/items/$ITEM_ID
-
-# View Lambda function logs
-FUNCTION_NAME=$(aws cloudformation describe-stacks \
-  --stack-name my-serverless-app \
-  --query "Stacks[0].Outputs[?OutputKey=='HonoApiFunctionName'].OutputValue" \
-  --output text || echo "dev-hono-api")
-
-aws logs get-log-events \
-  --log-group-name /aws/lambda/$FUNCTION_NAME \
-  --log-stream-name $(aws logs describe-log-streams \
-    --log-group-name /aws/lambda/$FUNCTION_NAME \
-    --order-by LastEventTime \
-    --descending \
-    --limit 1 \
-    --query 'logStreams[0].logStreamName' \
-    --output text)
-```
