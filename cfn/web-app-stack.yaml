@@ -268,6 +268,20 @@ Resources:
         - Key: Name
           Value: !Sub "${EnvironmentName}-WebServer-SG"
 
+  InstanceConnectEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 Instance Connect Endpoint
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-InstanceConnect-SG"
+
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -281,6 +295,40 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${EnvironmentName}-Database-SG"
+
+  # EC2 Instance Connect Endpoint
+  EC2InstanceConnectEndpoint:
+    Type: AWS::EC2::InstanceConnectEndpoint
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroupIds:
+        - !Ref InstanceConnectEndpointSecurityGroup
+      PreserveClientIp: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-InstanceConnectEndpoint"
+
+  # Bastion Host in Public Subnet
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref WebServerSecurityGroup
+          SubnetId: !Ref PublicSubnet1
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          echo "This is a bastion host for debugging" > /home/ec2-user/README.txt
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-BastionHost"
 
   # Load Balancer
   ApplicationLoadBalancer:
@@ -402,12 +450,34 @@ Resources:
             ?>
             EOF
             
+            # Create health check endpoint for ALB
+            cat > /var/www/html/health.php << 'EOF'
+            <?php
+            // Just return 200 OK for health checks
+            echo "OK";
+            ?>
+            EOF
+            
             echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
             echo "Hello from ${EnvironmentName} environment!" > /var/www/html/index.html
+            
+            # Setup detailed logging for troubleshooting
+            cat > /etc/httpd/conf.d/custom-logging.conf << 'EOF'
+            LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+            CustomLog "logs/access_log" combined
+            ErrorLogFormat "[%t] [%l] [pid %P] %F: %E: [client %a] %M"
+            EOF
             
             # Set permissions
             chown -R apache:apache /var/www/html/
             chmod -R 755 /var/www/html/
+            
+            # Restart Apache with new config
+            systemctl restart httpd
+            
+            # Write debug info to a file
+            echo "Instance setup completed at $(date)" > /home/ec2-user/setup-complete.log
+            echo "Database endpoint: ${Database.Endpoint.Address}" >> /home/ec2-user/setup-complete.log
         TagSpecifications:
           - ResourceType: instance
             Tags:
@@ -541,4 +611,16 @@ Outputs:
     Description: Name of the S3 bucket for web assets
     Value: !Ref WebAssetsBucket
     Export:
-      Name: !Sub "${EnvironmentName}-WebAssetsBucket" 
+      Name: !Sub "${EnvironmentName}-WebAssetsBucket"
+      
+  EC2InstanceConnectEndpointId:
+    Description: ID of the EC2 Instance Connect Endpoint
+    Value: !Ref EC2InstanceConnectEndpoint
+    Export:
+      Name: !Sub "${EnvironmentName}-EC2InstanceConnectEndpointId"
+      
+  BastionHostPublicIP:
+    Description: Public IP address of the bastion host
+    Value: !GetAtt BastionHost.PublicIp
+    Export:
+      Name: !Sub "${EnvironmentName}-BastionHostPublicIP" 
