@@ -347,7 +347,7 @@ Resources:
       DBInstanceClass: !Ref DBInstanceClass
       DBName: !Ref DBName
       Engine: mysql
-      EngineVersion: 8.0.28
+      EngineVersion: 5.7
       MasterUsername: !Ref DBUser
       MasterUserPassword: !Ref DBPassword
       MultiAZ: false
