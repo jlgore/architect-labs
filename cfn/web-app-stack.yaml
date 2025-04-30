@@ -82,6 +82,7 @@ Parameters:
   KeyName:
     Description: EC2 Key Pair for SSH access
     Type: AWS::EC2::KeyPair::KeyName
+    Default: vockey
 
 Mappings:
   RegionMap:
@@ -321,9 +322,48 @@ Resources:
         - Key: Name
           Value: !Sub "${EnvironmentName}-WebServer-TG"
 
+  # Database Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS database
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-DB-Subnet-Group"
+
+  # RDS MySQL Database
+  Database:
+    Type: AWS::RDS::DBInstance
+    DependsOn:
+      - PrivateSubnet1RouteTableAssociation
+      - PrivateSubnet2RouteTableAssociation
+      - DBSubnetGroup
+    Properties:
+      DBInstanceIdentifier: !Sub "${AWS::StackName}-database"
+      AllocatedStorage: !If [IsProd, 20, 5]
+      DBInstanceClass: !Ref DBInstanceClass
+      DBName: !Ref DBName
+      Engine: mysql
+      EngineVersion: 8.0.28
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: false
+      StorageType: gp2
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-MySQL-DB"
+    DeletionPolicy: Snapshot
+
   # Launch Template & Auto Scaling Group
   WebServerLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
+    DependsOn: Database
     Properties:
       LaunchTemplateName: !Sub "${EnvironmentName}-web-server-lt"
       VersionDescription: Initial version
@@ -341,8 +381,33 @@ Resources:
             amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
             systemctl enable httpd
             systemctl start httpd
+            
+            # Create a PHP file that connects to the database
+            cat > /var/www/html/db-test.php << 'EOF'
+            <?php
+            $servername = "${Database.Endpoint.Address}";
+            $username = "${DBUser}";
+            $password = "${DBPassword}";
+            $dbname = "${DBName}";
+            
+            // Create connection
+            $conn = new mysqli($servername, $username, $password, $dbname);
+            
+            // Check connection
+            if ($conn->connect_error) {
+              die("Connection failed: " . $conn->connect_error);
+            }
+            echo "Connected to database successfully!";
+            $conn->close();
+            ?>
+            EOF
+            
             echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
             echo "Hello from ${EnvironmentName} environment!" > /var/www/html/index.html
+            
+            # Set permissions
+            chown -R apache:apache /var/www/html/
+            chmod -R 755 /var/www/html/
         TagSpecifications:
           - ResourceType: instance
             Tags:
@@ -351,6 +416,7 @@ Resources:
 
   WebServerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: Database
     Properties:
       VPCZoneIdentifier:
         - !Ref PrivateSubnet1
@@ -421,39 +487,6 @@ Resources:
         - Name: AutoScalingGroupName
           Value: !Ref WebServerAutoScalingGroup
       ComparisonOperator: LessThanThreshold
-
-  # Database Subnet Group
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Subnet group for RDS database
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-      Tags:
-        - Key: Name
-          Value: !Sub "${EnvironmentName}-DB-Subnet-Group"
-
-  # RDS MySQL Database
-  Database:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      AllocatedStorage: !If [IsProd, 20, 5]
-      DBInstanceClass: !Ref DBInstanceClass
-      DBName: !Ref DBName
-      Engine: MySQL
-      EngineVersion: 8.0.28
-      MasterUsername: !Ref DBUser
-      MasterUserPassword: !Ref DBPassword
-      MultiAZ: !If [IsProd, true, false]
-      StorageType: gp2
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      VPCSecurityGroups:
-        - !Ref DatabaseSecurityGroup
-      Tags:
-        - Key: Name
-          Value: !Sub "${EnvironmentName}-MySQL-DB"
-    DeletionPolicy: Snapshot
 
   # S3 Bucket for web assets
   WebAssetsBucket:
