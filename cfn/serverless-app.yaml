@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Web API with EC2 and RDS
+Description: Serverless API with Lambda, CloudFront, and RDS
 
 Parameters:
   Environment:
@@ -11,17 +11,13 @@ Parameters:
       - prod
     Description: Environment name
     
-  EC2InstanceType:
+  LambdaRuntime:
     Type: String
-    Default: t3.micro
+    Default: nodejs18.x
     AllowedValues:
-      - t2.nano
-      - t2.micro
-      - t2.small
-      - t3.nano
-      - t3.micro
-      - t3.small
-    Description: EC2 instance type
+      - nodejs16.x
+      - nodejs18.x
+    Description: Lambda function runtime
     
   DBUsername:
     Type: String
@@ -39,7 +35,7 @@ Parameters:
     ConstraintDescription: must contain only alphanumeric characters
 
 Resources:
-  # VPC for our resources
+  # VPC for our database
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -50,58 +46,6 @@ Resources:
         - Key: Name
           Value: !Sub "${Environment}-VPC"
 
-  # Public subnet for the EC2 instance
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.1.0/24
-      MapPublicIpOnLaunch: true
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: !Sub "${Environment}-PublicSubnet"
-  
-  # Internet Gateway
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: !Sub "${Environment}-IGW"
-          
-  # Attach Internet Gateway to VPC
-  InternetGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref VPC
-      InternetGatewayId: !Ref InternetGateway
-  
-  # Route Table
-  PublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub "${Environment}-PublicRouteTable"
-  
-  # Route to Internet
-  PublicRoute:
-    Type: AWS::EC2::Route
-    DependsOn: InternetGatewayAttachment
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-  
-  # Associate Route Table with Subnet
-  PublicSubnetRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet
-      RouteTableId: !Ref PublicRouteTable
-  
   # DB Subnet Group
   DBSubnet1:
     Type: AWS::EC2::Subnet
@@ -130,95 +74,132 @@ Resources:
       SubnetIds:
         - !Ref DBSubnet1
         - !Ref DBSubnet2
-  
-  # Security Groups
-  WebServerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+
+  # Internet Gateway for VPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
     Properties:
-      GroupDescription: Allow HTTP inbound traffic
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub "${Environment}-WebSG"
+          Value: !Sub "${Environment}-IGW"
           
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Route Table for DB subnets
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-RouteTable"
+
+  # Route to the internet
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Associate Route Table with Subnets
+  DBSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DBSubnet1
+      RouteTableId: !Ref RouteTable
+
+  DBSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DBSubnet2
+      RouteTableId: !Ref RouteTable
+
+  # Security Group for RDS
   DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow MySQL traffic from Web Server
+      GroupDescription: Enable MySQL access
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
-          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: !Sub "${Environment}-DBSG"
-  
-  # EC2 Web Server
-  WebServerInstance:
-    Type: AWS::EC2::Instance
-    DependsOn: Database
+
+  # S3 Bucket for Lambda Code
+  LambdaCodeBucket:
+    Type: AWS::S3::Bucket
     Properties:
-      InstanceType: !Ref EC2InstanceType
-      KeyName: vockey
-      ImageId: ami-0533f2ba8a1995cf9  # Amazon Linux 2023 - adjust for your region
-      NetworkInterfaces:
-        - AssociatePublicIpAddress: true
-          DeviceIndex: 0
-          GroupSet:
-            - !Ref WebServerSecurityGroup
-          SubnetId: !Ref PublicSubnet
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash -xe
-          yum update -y
-          yum install -y httpd mysql
-          
-          # Install Node.js
-          curl -sL https://rpm.nodesource.com/setup_16.x | bash -
-          yum install -y nodejs
-          
-          # Create a simple Express API
-          mkdir -p /var/www/api
-          cd /var/www/api
-          
-          cat > package.json << 'EOL'
-          {
-            "name": "simple-api",
-            "version": "1.0.0",
-            "dependencies": {
-              "express": "^4.17.1",
-              "mysql2": "^2.3.0"
-            }
-          }
-          EOL
-          
-          cat > server.js << 'EOL'
-          const express = require('express');
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            ExpirationInDays: 365
+            NoncurrentVersionExpirationInDays: 30
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  # Lambda Function for API
+  APIFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: !Ref LambdaRuntime
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: appdatabase
+          DB_USER: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+      Code:
+        ZipFile: |
+          const { Hono } = require('hono');
+          const { handle } = require('hono/aws-lambda');
           const mysql = require('mysql2/promise');
           
-          const app = express();
-          const port = 80;
+          const app = new Hono();
           
           // Database configuration
           const dbConfig = {
-            host: '${Database.Endpoint.Address}',
-            user: '${DBUsername}',
-            password: '${DBPassword}',
-            database: 'appdatabase'
+            host: process.env.DB_HOST,
+            port: process.env.DB_PORT,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            database: process.env.DB_NAME
           };
           
-          app.get('/items', async (req, res) => {
+          app.get('/', (c) => {
+            return c.json({ message: 'Hello from Hono!' });
+          });
+          
+          app.get('/items', async (c) => {
             try {
               // Create connection to MySQL
               const connection = await mysql.createConnection(dbConfig);
@@ -247,48 +228,62 @@ Resources:
               await connection.end();
               
               // Return items as JSON
-              res.json({ items: rows });
+              return c.json({ items: rows });
             } catch (error) {
               console.error('Error:', error);
-              res.status(500).json({ error: 'Database error' });
+              return c.json({ error: 'Database error' }, 500);
             }
           });
           
-          app.listen(port, () => {
-            console.log(`API server running on port ${port}`);
-          });
-          EOL
-          
-          # Install dependencies and start the server
-          cd /var/www/api
-          npm install
-          
-          # Configure service
-          cat > /etc/systemd/system/api.service << 'EOL'
-          [Unit]
-          Description=Node.js API Server
-          After=network.target
-          
-          [Service]
-          WorkingDirectory=/var/www/api
-          ExecStart=/usr/bin/node server.js
-          Restart=always
-          User=root
-          Group=root
-          Environment=PATH=/usr/bin:/usr/local/bin
-          Environment=NODE_ENV=production
-          
-          [Install]
-          WantedBy=multi-user.target
-          EOL
-          
-          # Enable and start API service
-          systemctl enable api.service
-          systemctl start api.service
-          
+          exports.handler = handle(app);
+      # Install additional packages
       Tags:
-        - Key: Name
-          Value: !Sub "${Environment}-WebServer"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda URL Configuration
+  LambdaFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt APIFunction.Arn
+
+  # Lambda Resource Policy
+  LambdaPermissionForURLInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref APIFunction
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  # CloudFront Distribution to access Lambda URL
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          TargetOriginId: LambdaOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AllViewerExceptHostHeader
+        Origins:
+          - Id: LambdaOrigin
+            DomainName: !Select [2, !Split ["/", !GetAtt LambdaFunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+        PriceClass: PriceClass_100
+        Comment: !Sub "${Environment} API Distribution"
   
   # RDS Database
   Database:
@@ -305,23 +300,41 @@ Resources:
       VPCSecurityGroups:
         - !GetAtt DBSecurityGroup.GroupId
       DBSubnetGroupName: !Ref DBSubnetGroup
-      PubliclyAccessible: false
+      PubliclyAccessible: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
 
+  # Layer for Hono.js and other dependencies
+  LambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes:
+        - nodejs16.x
+        - nodejs18.x
+      Content:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: layer.zip
+      Description: Layer containing Hono.js and MySQL dependencies
+
 Outputs:
-  WebServerPublicIP:
-    Description: Public IP address of the web server
-    Value: !GetAtt WebServerInstance.PublicIp
+  LambdaFunctionUrl:
+    Description: Direct Lambda Function URL
+    Value: !GetAtt LambdaFunctionUrl.FunctionUrl
     Export:
-      Name: !Sub "${Environment}-WebServerPublicIP"
+      Name: !Sub "${Environment}-LambdaFunctionUrl"
       
-  APIEndpoint:
-    Description: API endpoint URL
-    Value: !Sub "http://${WebServerInstance.PublicIp}/items"
+  CloudFrontDomain:
+    Description: CloudFront Distribution Domain
+    Value: !GetAtt CloudFrontDistribution.DomainName
     Export:
-      Name: !Sub "${Environment}-APIEndpoint"
+      Name: !Sub "${Environment}-CloudFrontDomain"
+      
+  ApiEndpoint:
+    Description: API endpoint URL (through CloudFront)
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}/items"
+    Export:
+      Name: !Sub "${Environment}-ApiEndpoint"
       
   DatabaseEndpoint:
     Description: RDS Database endpoint
