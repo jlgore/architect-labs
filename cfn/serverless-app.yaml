@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Serverless API with Lambda, API Gateway, and RDS
+Description: Web API with EC2 and RDS
 
 Parameters:
   Environment:
@@ -11,13 +11,17 @@ Parameters:
       - prod
     Description: Environment name
     
-  LambdaRuntime:
+  EC2InstanceType:
     Type: String
-    Default: nodejs18.x
+    Default: t3.micro
     AllowedValues:
-      - nodejs16.x
-      - nodejs18.x
-    Description: Lambda function runtime
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t3.nano
+      - t3.micro
+      - t3.small
+    Description: EC2 instance type
     
   DBUsername:
     Type: String
@@ -35,51 +39,256 @@ Parameters:
     ConstraintDescription: must contain only alphanumeric characters
 
 Resources:
-  # API Gateway REST API
-  ApiGateway:
-    Type: AWS::ApiGateway::RestApi
+  # VPC for our resources
+  VPC:
+    Type: AWS::EC2::VPC
     Properties:
-      Name: !Sub "${Environment}-items-api"
-      Description: API for managing items
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-VPC"
+
+  # Public subnet for the EC2 instance
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-PublicSubnet"
   
-  # API Gateway Resources and Methods
-  ItemsResource:
-    Type: AWS::ApiGateway::Resource
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
     Properties:
-      RestApiId: !Ref ApiGateway
-      ParentId: !GetAtt ApiGateway.RootResourceId
-      PathPart: "items"
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-IGW"
+          
+  # Attach Internet Gateway to VPC
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
   
-  GetItemsMethod:
-    Type: AWS::ApiGateway::Method
+  # Route Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
     Properties:
-      RestApiId: !Ref ApiGateway
-      ResourceId: !Ref ItemsResource
-      HttpMethod: GET
-      AuthorizationType: NONE
-      Integration:
-        Type: HTTP
-        IntegrationHttpMethod: GET
-        Uri: !Sub "http://${Database.Endpoint.Address}:${Database.Endpoint.Port}/appdatabase/items"
-        PassthroughBehavior: WHEN_NO_MATCH
-        RequestTemplates:
-          application/json: '{"statusCode": 200}'
-        IntegrationResponses:
-          - StatusCode: 200
-            ResponseTemplates:
-              application/json: '{"items": []}'
-      MethodResponses:
-        - StatusCode: 200
-          ResponseModels:
-            application/json: "Empty"
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-PublicRouteTable"
   
-  # API Deployment
-  ApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn: GetItemsMethod
+  # Route to Internet
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
     Properties:
-      RestApiId: !Ref ApiGateway
-      StageName: !Ref Environment
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  
+  # Associate Route Table with Subnet
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  
+  # DB Subnet Group
+  DBSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-DBSubnet1"
+  
+  DBSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-DBSubnet2"
+          
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref DBSubnet1
+        - !Ref DBSubnet2
+  
+  # Security Groups
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP inbound traffic
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-WebSG"
+          
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow MySQL traffic from Web Server
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-DBSG"
+  
+  # EC2 Web Server
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: Database
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      KeyName: vockey
+      ImageId: ami-0533f2ba8a1995cf9  # Amazon Linux 2023 - adjust for your region
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref WebServerSecurityGroup
+          SubnetId: !Ref PublicSubnet
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install -y httpd mysql
+          
+          # Install Node.js
+          curl -sL https://rpm.nodesource.com/setup_16.x | bash -
+          yum install -y nodejs
+          
+          # Create a simple Express API
+          mkdir -p /var/www/api
+          cd /var/www/api
+          
+          cat > package.json << 'EOL'
+          {
+            "name": "simple-api",
+            "version": "1.0.0",
+            "dependencies": {
+              "express": "^4.17.1",
+              "mysql2": "^2.3.0"
+            }
+          }
+          EOL
+          
+          cat > server.js << 'EOL'
+          const express = require('express');
+          const mysql = require('mysql2/promise');
+          
+          const app = express();
+          const port = 80;
+          
+          // Database configuration
+          const dbConfig = {
+            host: '${Database.Endpoint.Address}',
+            user: '${DBUsername}',
+            password: '${DBPassword}',
+            database: 'appdatabase'
+          };
+          
+          app.get('/items', async (req, res) => {
+            try {
+              // Create connection to MySQL
+              const connection = await mysql.createConnection(dbConfig);
+              
+              // Create items table if it doesn't exist
+              await connection.execute(`
+                CREATE TABLE IF NOT EXISTS items (
+                  id INT AUTO_INCREMENT PRIMARY KEY,
+                  name VARCHAR(255) NOT NULL,
+                  description TEXT
+                )
+              `);
+              
+              // Sample data
+              await connection.execute(`
+                INSERT IGNORE INTO items (id, name, description) VALUES 
+                (1, 'Item 1', 'First item'),
+                (2, 'Item 2', 'Second item'),
+                (3, 'Item 3', 'Third item')
+              `);
+              
+              // Query items
+              const [rows] = await connection.execute('SELECT * FROM items');
+              
+              // Close connection
+              await connection.end();
+              
+              // Return items as JSON
+              res.json({ items: rows });
+            } catch (error) {
+              console.error('Error:', error);
+              res.status(500).json({ error: 'Database error' });
+            }
+          });
+          
+          app.listen(port, () => {
+            console.log(`API server running on port ${port}`);
+          });
+          EOL
+          
+          # Install dependencies and start the server
+          cd /var/www/api
+          npm install
+          
+          # Configure service
+          cat > /etc/systemd/system/api.service << 'EOL'
+          [Unit]
+          Description=Node.js API Server
+          After=network.target
+          
+          [Service]
+          WorkingDirectory=/var/www/api
+          ExecStart=/usr/bin/node server.js
+          Restart=always
+          User=root
+          Group=root
+          Environment=PATH=/usr/bin:/usr/local/bin
+          Environment=NODE_ENV=production
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOL
+          
+          # Enable and start API service
+          systemctl enable api.service
+          systemctl start api.service
+          
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-WebServer"
   
   # RDS Database
   Database:
@@ -93,17 +302,26 @@ Resources:
       StorageType: gp2
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
-      PubliclyAccessible: true
+      VPCSecurityGroups:
+        - !GetAtt DBSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
       Tags:
         - Key: Environment
           Value: !Ref Environment
 
 Outputs:
-  ApiEndpoint:
-    Description: API Gateway endpoint URL
-    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+  WebServerPublicIP:
+    Description: Public IP address of the web server
+    Value: !GetAtt WebServerInstance.PublicIp
     Export:
-      Name: !Sub "${Environment}-ApiEndpoint"
+      Name: !Sub "${Environment}-WebServerPublicIP"
+      
+  APIEndpoint:
+    Description: API endpoint URL
+    Value: !Sub "http://${WebServerInstance.PublicIp}/items"
+    Export:
+      Name: !Sub "${Environment}-APIEndpoint"
       
   DatabaseEndpoint:
     Description: RDS Database endpoint
