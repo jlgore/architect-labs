@@ -61,6 +61,12 @@ SUBNET_CIDR="10.0.1.0/24"
 VPC_ID=$(aws ec2 create-vpc --cidr-block $VPC_CIDR --query 'Vpc.VpcId' --output text)
 aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value=${PREFIX}-vpc
 
+# Enable DNS support and hostnames for the VPC (required for public RDS)
+echo "Enabling DNS support and hostnames for VPC $VPC_ID..."
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support '{"Value":true}'
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames '{"Value":true}'
+echo "DNS settings enabled for VPC $VPC_ID."
+
 # Create subnet
 SUBNET_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR --query 'Subnet.SubnetId' --output text)
 aws ec2 create-tags --resources $SUBNET_ID --tags Key=Name,Value=${PREFIX}-subnet
@@ -120,6 +126,16 @@ echo "Creating S3 buckets with insecure configurations..."
 # Create public bucket
 PUBLIC_BUCKET="${PREFIX}-public-bucket"
 aws s3api create-bucket --bucket $PUBLIC_BUCKET --region $AWS_REGION
+
+# Allow public access at the account level (ensure this is intended for a lab environment)
+echo "Attempting to configure account-level S3 Public Access Block settings to be permissive..."
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+if [ -n "$ACCOUNT_ID" ]; then
+  aws s3control put-public-access-block --account-id $ACCOUNT_ID --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+  echo "S3 Public Access Block settings configured for account $ACCOUNT_ID."
+else
+  echo "Warning: Could not retrieve AWS Account ID to configure S3 Public Access Block settings."
+fi
 
 # Make bucket public
 aws s3api put-bucket-policy --bucket $PUBLIC_BUCKET --policy "{
