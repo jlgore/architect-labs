@@ -195,7 +195,7 @@ resource "aws_ecs_task_definition" "minecraft_server" {
         },
         {
           name  = "PLUGINS"
-          value = "https://github.com/ServerTap/ServerTap/releases/download/0.8.0/ServerTap.jar"
+          value = "https://github.com/servertap-io/servertap/releases/download/v0.6.1/servertap-0.6.1.jar"
         },
         {
           name  = "SERVER_TAP_ENABLED"

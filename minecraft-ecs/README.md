@@ -171,49 +171,9 @@ aws ec2 authorize-security-group-ingress \
     --cidr 0.0.0.0/0
 ```
 
-## Step 3: Create an EFS File System for Persistent Storage
+## Step 3: Configure Local Storage
 
-To maintain our Minecraft world data across container restarts, we'll use Amazon EFS:
-
-```bash
-# Create EFS Security Group
-EFS_SG_ID=$(aws ec2 create-security-group \
-    --group-name minecraft-efs-sg \
-    --description "Security group for Minecraft EFS" \
-    --vpc-id $VPC_ID \
-    --query 'GroupId' \
-    --output text)
-echo "EFS Security Group created with ID: $EFS_SG_ID"
-
-# Allow NFS traffic from Minecraft security group
-aws ec2 authorize-security-group-ingress \
-    --group-id $EFS_SG_ID \
-    --protocol tcp \
-    --port 2049 \
-    --source-group $MC_SG_ID
-
-# Create EFS File System
-EFS_ID=$(aws efs create-file-system \
-    --performance-mode generalPurpose \
-    --throughput-mode bursting \
-    --encrypted \
-    --tags Key=Name,Value=minecraft-data \
-    --query 'FileSystemId' \
-    --output text)
-echo "EFS File System created with ID: $EFS_ID"
-
-# Create mount targets in both AZs
-for SUBNET_ID in $PUBLIC_SUBNET_1_ID $PUBLIC_SUBNET_2_ID; do
-    aws efs create-mount-target \
-        --file-system-id $EFS_ID \
-        --subnet-id $SUBNET_ID \
-        --security-groups $EFS_SG_ID
-done
-
-# Wait for EFS to be available
-echo "Waiting for EFS to become available..."
-sleep 30
-```
+For this lab, we'll use local storage for the Minecraft server. Note that this means world data will be lost when the container is stopped or restarted. For production use, consider implementing a persistent storage solution like Amazon EFS.
 
 ## Step 4: Create ECS Cluster
 
@@ -506,7 +466,7 @@ aws iam delete-role \
 
 - **Cost Optimization**:
   - ECS Fargate: The container will only run when needed
-  - EFS: Only used for persistent data storage
+  - Local storage: Used for temporary data (data will be lost when container stops)
   - Consider stopping the ECS service when not actively using the server
 
 - **Performance Considerations**:
@@ -520,6 +480,7 @@ aws iam delete-role \
   - For a production environment, add password protection or a whitelist of players
 
 - **Persistent Data**:
-  - All world data and configurations are stored on EFS for persistence
-  - EFS ensures your world data survives container restarts
+  - World data is stored locally in the container's filesystem
+  - Data will be lost when the container is stopped or restarted
+  - For production use, consider implementing a persistent storage solution like Amazon EFS
   - Consider implementing backup strategies for important world data 
