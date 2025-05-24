@@ -314,15 +314,16 @@ Once connected, run the following SQL DDL (PostgreSQL syntax):
 
 ```sql
 -- Stores Table
-CREATE TABLE Stores (
+CREATE TABLE stores (
     store_id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     address VARCHAR(255),
-    city VARCHAR(100)
+    city VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- InventoryItems Table
-CREATE TABLE InventoryItems (
+CREATE TABLE inventoryitems (
     item_id SERIAL PRIMARY KEY,
     store_id INT NOT NULL,
     item_name VARCHAR(255) NOT NULL,
@@ -330,12 +331,12 @@ CREATE TABLE InventoryItems (
     price DECIMAL(10, 2) DEFAULT 0.00,
     CONSTRAINT fk_store
         FOREIGN KEY(store_id)
-        REFERENCES Stores(store_id)
+        REFERENCES stores(store_id)
         ON DELETE CASCADE
 );
 
 -- GasPrices Table
-CREATE TABLE GasPrices (
+CREATE TABLE gasprices (
     gas_price_id SERIAL PRIMARY KEY,
     store_id INT NOT NULL,
     fuel_type VARCHAR(50) NOT NULL, -- e.g., 'Regular', 'Premium', 'Diesel'
@@ -343,13 +344,14 @@ CREATE TABLE GasPrices (
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_store_gas
         FOREIGN KEY(store_id)
-        REFERENCES Stores(store_id)
-        ON DELETE CASCADE
+        REFERENCES stores(store_id)
+        ON DELETE CASCADE,
+    CONSTRAINT unique_store_fuel UNIQUE (store_id, fuel_type)
 );
 
 -- You might want to add some indexes for performance later on, e.g., on store_id in InventoryItems and GasPrices
-CREATE INDEX idx_inventoryitems_store_id ON InventoryItems(store_id);
-CREATE INDEX idx_gasprices_store_id ON GasPrices(store_id);
+CREATE INDEX idx_inventoryitems_store_id ON inventoryitems(store_id);
+CREATE INDEX idx_gasprices_store_id ON gasprices(store_id);
 
 -- Verify table creation
 \dt
@@ -363,18 +365,23 @@ Disconnect from `psql`.
 
 ## Step 4: `StoreServiceLambda` Deployment
 
-This Lambda will handle CRUD operations for stores. It will connect to the PostgreSQL database using credentials and connection details passed as environment variables.
+This Lambda manages store information (ID, name, address).
 
-**1. Create Lambda Function Code (`store_lambda_function.py`):**
+### 1. Create the Lambda Function Package
 
-This Python script uses the `psycopg2-binary` library to interact with PostgreSQL.
+First, create a directory for the Lambda function and its dependencies:
 
 ```bash
 # Create a directory for this Lambda function's package
-mkdir store_service_pkg
-cd store_service_pkg
+mkdir -p store_service
+cd store_service
+```
 
-cat > lambda_function.py << EOF
+### 2. Create the Lambda Function Code
+
+Create a file named `lambda_function.py` with the following content:
+
+```python
 import json
 import os
 import psycopg2
@@ -398,214 +405,269 @@ def get_db_connection():
         return conn
     except Exception as e:
         print(f"Database connection failed: {e}")
-        raise e # Re-raise exception to signal error
+        raise e  # Re-raise exception to signal error
 
 def lambda_handler(event, context):
-    # For Lambda Function URL, the actual request body is in event['body'] as a JSON string.
-    print(f"Raw event received: {json.dumps(event)}") # Log the raw event
+    # For Lambda Function URL, the actual request body is in event['body'] as a JSON string
+    print(f"Raw event received: {json.dumps(event)}")
 
     try:
-        # Check if 'body' exists and is a string (typical for Function URL POST requests)
+        # Parse the request body
         if 'body' in event and isinstance(event['body'], str):
             print(f"Attempting to parse event body: {event['body']}")
-            data_for_processing = json.loads(event['body'])
-        # Check if event itself is the direct payload (e.g. from Lambda test console or direct CLI invoke without Function URL)
-        elif 'action' in event and 'payload' in event: # Heuristic for direct invoke
-            print("Using event directly as data for processing.")
-            data_for_processing = event
-        else: # Fallback or if body is already parsed (should not happen with default Function URL config)
-            print("Warning: Could not determine primary data source from event, attempting to use event or event['body'] if dict.")
-            body_content = event.get('body', event)
-            if isinstance(body_content, str):
-                 data_for_processing = json.loads(body_content)
-            elif isinstance(body_content, dict):
-                 data_for_processing = body_content
-            else:
-                 raise ValueError("Unable to determine data for processing from event structure.")
-
-        print(f"Data for processing: {json.dumps(data_for_processing)}")
-
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Invalid JSON in request body: {e}")
-        return {
-            'statusCode': 400,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'Invalid JSON format in request body', 'details': str(e)})
-        }
-    except ValueError as e:
-        print(f"ERROR: Problem determining data from event: {e}")
-        return {
-            'statusCode': 400,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'Invalid event structure for processing', 'details': str(e)})
-        }
-    except Exception as e: # Catch-all for other unexpected errors during event processing
-        print(f"ERROR: Unexpected error processing event: {e}")
-        return {
-            'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'Internal server error during event processing', 'details': str(e)})
-        }
-
-    action = data_for_processing.get('action')
-    payload = data_for_processing.get('payload', {})
-    response_body = {}
-    status_code = 200
-
-    conn = None # Initialize conn here
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        if action == 'addStore':
-            name = payload.get('name')
-            address = payload.get('address')
-            city = payload.get('city')
-            if not name or not city: # Name and City are mandatory
-                status_code = 400
-                response_body = {'error': 'Missing required fields: name and city'}
-            else:
-                cursor.execute(
-                    "INSERT INTO Stores (name, address, city) VALUES (%s, %s, %s) RETURNING store_id",
-                    (name, address, city)
-                )
-                store_id = cursor.fetchone()[0]
-                conn.commit()
-                response_body = {'message': 'Store added successfully', 'store_id': store_id}
-        
-        elif action == 'getStore':
-            store_id = payload.get('store_id')
-            if not store_id:
-                status_code = 400
-                response_body = {'error': 'Missing store_id'}
-            else:
-                cursor.execute("SELECT store_id, name, address, city FROM Stores WHERE store_id = %s", (store_id,))
-                store = cursor.fetchone()
-                if store:
-                    response_body = {'store_id': store[0], 'name': store[1], 'address': store[2], 'city': store[3]}
-                else:
-                    status_code = 404
-                    response_body = {'error': 'Store not found'}
-        
-        elif action == 'listStores':
-            cursor.execute("SELECT store_id, name, address, city FROM Stores ORDER BY name")
-            stores = cursor.fetchall()
-            response_body = [{'store_id': s[0], 'name': s[1], 'address': s[2], 'city': s[3]} for s in stores]
-        
+            body = json.loads(event['body'])
         else:
-            status_code = 400
-            response_body = {'error': f'Invalid action: {action}'}
-
-    except psycopg2.Error as db_err: # More specific DB errors
-        print(f"Database operation failed: {db_err}")
-        status_code = 500
-        response_body = {'error': 'Database operation failed', 'details': str(db_err)}
-        if conn: # Rollback on error if connection was established
-            conn.rollback()
+            body = event.get('body', {})  # In case body is already parsed
+            print(f"Using event body as is: {body}")
+        
+        action = body.get('action')
+        
+        if not action:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Missing action parameter'}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+        
+        if action == 'addStore':
+            # Extract store data from the request
+            store_data = body.get('store')
+            if not store_data or 'name' not in store_data or 'address' not in store_data:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'Missing required store data (name, address)'}),
+                    'headers': {'Content-Type': 'application/json'}
+                }
+            
+            # Get database connection
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cur:
+                    # Insert new store
+                    cur.execute(
+                        """
+                        INSERT INTO stores (name, address)
+                        VALUES (%s, %s)
+                        RETURNING store_id, name, address, created_at
+                        """,
+                        (store_data['name'], store_data['address'])
+                    )
+                    result = cur.fetchone()
+                    conn.commit()
+                    
+                    # Return the created store
+                    return {
+                        'statusCode': 201,
+                        'body': json.dumps({
+                            'store_id': result[0],
+                            'name': result[1],
+                            'address': result[2],
+                            'created_at': result[3].isoformat()
+                        }),
+                        'headers': {'Content-Type': 'application/json'}
+                    }
+            finally:
+                conn.close()
+                
+        elif action == 'getStore':
+            store_id = body.get('store_id')
+            if not store_id:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'Missing store_id parameter'}),
+                    'headers': {'Content-Type': 'application/json'}
+                }
+            
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT store_id, name, address, created_at
+                        FROM stores
+                        WHERE store_id = %s
+                        """,
+                        (store_id,)
+                    )
+                    result = cur.fetchone()
+                    
+                    if not result:
+                        return {
+                            'statusCode': 404,
+                            'body': json.dumps({'error': 'Store not found'}),
+                            'headers': {'Content-Type': 'application/json'}
+                        }
+                    
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps({
+                            'store_id': result[0],
+                            'name': result[1],
+                            'address': result[2],
+                            'created_at': result[3].isoformat()
+                        }),
+                        'headers': {'Content-Type': 'application/json'}
+                    }
+            finally:
+                conn.close()
+                
+        elif action == 'listStores':
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT store_id, name, address, created_at
+                        FROM stores
+                        ORDER BY name
+                        """
+                    )
+                    stores = []
+                    for row in cur.fetchall():
+                        stores.append({
+                            'store_id': row[0],
+                            'name': row[1],
+                            'address': row[2],
+                            'created_at': row[3].isoformat()
+                        })
+                    
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps({'stores': stores}),
+                        'headers': {'Content-Type': 'application/json'}
+                    }
+            finally:
+                conn.close()
+        else:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': f'Unknown action: {action}'}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+            
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON in request body: {e}")
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': 'Invalid JSON in request body'}),
+            'headers': {'Content-Type': 'application/json'}
+        }
     except Exception as e:
         print(f"Error processing request: {e}")
-        status_code = 500
-        response_body = {'error': 'Internal server error', 'details': str(e)}
-    finally:
-        if conn:
-            cursor.close()
-            conn.close()
-            print("Database connection closed.")
-
-    return {
-        'statusCode': status_code,
-        'headers': {
-            'Content-Type': 'application/json'
-        },
-        'body': json.dumps(response_body)
-    }
-
-EOF
-
-ls -l lambda_function.py
-cd .. # Return to the main lambda-microservices directory or your project root
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'Internal server error', 'details': str(e)}),
+            'headers': {'Content-Type': 'application/json'}
+        }
 ```
 
-**Key features of this Lambda code:**
-- Retrieves DB connection details from environment variables.
-- Establishes a connection to PostgreSQL.
-- Handles three actions: `addStore`, `getStore`, and `listStores`.
-- Uses parameterized queries to prevent SQL injection.
-- Commits transactions for `addStore`.
-- Includes basic error handling and ensures the database connection is closed.
-- Returns responses in the format expected by Lambda Function URLs.
+### 3. Create a requirements.txt File
 
-**2. Package the Lambda Function with Dependencies:**
-
-`psycopg2-binary` needs to be included in your deployment package. These commands should be run from the `lambda-microservices` directory (or wherever you created `store_service_pkg`).
+Create a `requirements.txt` file to specify the dependencies:
 
 ```bash
-# Ensure you are in the directory containing store_service_pkg, e.g., lambda-microservices/
+cat > requirements.txt << EOF
+psycopg2-binary==2.9.9
+EOF
+```
 
-# Install psycopg2-binary into the package directory
-# Using python3.9, adjust if your CloudShell default python points elsewhere or if lambda runtime is different
-python3.9 -m pip install psycopg2-binary -t ./store_service_pkg/
+### 4. Install Dependencies and Create Deployment Package
 
-# Create the zip file
-cd store_service_pkg
+```bash
+# Install dependencies into the current directory
+python3.9 -m pip install -r requirements.txt -t . --no-cache-dir
+
+# Create the deployment package
 zip -r ../store_service.zip .
+
+# Return to the parent directory
 cd ..
 
+# Verify the zip file was created
 ls -l store_service.zip
 ```
-**Note on `psycopg2-binary` and Lambda Runtimes:**
-`psycopg2-binary` contains compiled C extensions. It's crucial that these are compatible with the Lambda execution environment (Amazon Linux). Installing it this way on a Linux environment like CloudShell *usually* works. If you encounter runtime import errors for `psycopg2` in Lambda later, it might mean you need a version compiled specifically for Amazon Linux 2 (which Lambda Python runtimes use). One common way to get a compatible version is to use a Docker container running `amazonlinux:2` to build the package, or use pre-compiled Lambda layers for `psycopg2` if available and allowed by sandbox.
-For this lab, we'll try the direct pip install first as it's simpler.
 
-**3. Deploy `StoreServiceLambda`:**
+### 5. Deploy the Lambda Function
 
-Before running this, ensure your RDS instance is `available` and you have its endpoint (`$QM_RDS_HOST`), port (`$QM_RDS_PORT`), admin user (`$QM_RDS_USER`), your chosen password for the DB (`$QM_RDS_PASSWORD - this must be the actual password, not the placeholder`), and DB name (`$QM_RDS_DB_NAME`). Also, ensure `$DEFAULT_SUBNET_1_ID`, `$DEFAULT_SUBNET_2_ID`, and `$LAMBDA_SG_ID` are correctly set from previous steps.
+Before deploying, ensure you have the following environment variables set:
 
 ```bash
-# Set Lambda specific variables
+# Set required variables for Lambda deployment
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export LAMBDA_ROLE_NAME="lambda-run-role"  # Replace with your IAM role name
+export LAMBDA_EXECUTION_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${LAMBDA_ROLE_NAME}"
+
+# Region should be set from earlier steps, if not:
+# export REGION="us-east-1"
+
+# RDS variables should be set from Step 3, if not:
+# export QM_RDS_HOST=$RDS_ENDPOINT_ADDRESS
+# export QM_RDS_PORT=$RDS_ENDPOINT_PORT
+# export QM_RDS_DB_NAME=$DB_NAME
+# export QM_RDS_USER=$DB_USER
+# export QM_RDS_PASSWORD=$DB_PASSWORD_PLACEHOLDER
+
+echo "AWS Account ID: $AWS_ACCOUNT_ID"
+echo "Lambda Role: $LAMBDA_EXECUTION_ROLE_ARN"
+echo "Region: $REGION"
+echo "RDS Host: $QM_RDS_HOST"
+```
+
+```bash
+# Set Lambda function name
 STORE_LAMBDA_NAME="qm-store-service"
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) # Already defined earlier, ensure it is current
-LAMBDA_ROLE_NAME="lambda-run-role" # Already defined earlier
-LAMBDA_EXECUTION_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${LAMBDA_ROLE_NAME}" # Already defined earlier
 
-# Ensure QM_RDS_PASSWORD is set to your actual chosen password in your shell environment
-# For example: export QM_RDS_PASSWORD='YourStrongPassword123!'
-# DO NOT USE the placeholder "YOUR_CHOSEN_STRONG_PASSWORD" here.
-
-# Note: Since the Lambda will run outside the VPC and connect to the public RDS endpoint,
-# the execution role does not need EC2 CreateNetworkInterface permissions.
-# Ensure the qm-rds-sg allows traffic from 0.0.0.0/0 on the DB port (as configured for psql access).
-
-
-
+# Create the Lambda function
 echo "Deploying $STORE_LAMBDA_NAME..."
+aws lambda create-function \
+    --function-name $STORE_LAMBDA_NAME \
+    --runtime python3.9 \
+    --role $LAMBDA_EXECUTION_ROLE_ARN \
+    --handler lambda_function.lambda_handler \
+    --zip-file fileb://store_service.zip \
+    --environment "Variables={
+        DB_HOST='$QM_RDS_HOST',
+        DB_PORT='$QM_RDS_PORT',
+        DB_NAME='$QM_RDS_DB_NAME',
+        DB_USER='$QM_RDS_USER',
+        DB_PASSWORD='$QM_RDS_PASSWORD'\
+    }" \
+    --timeout 30 \
+    --memory-size 256 \
+    --region $REGION
+
+# Create Function URL
+echo "Creating Function URL for $STORE_LAMBDA_NAME..."
+aws lambda create-function-url-config \
+    --function-name $STORE_LAMBDA_NAME \
+    --auth-type NONE \
+    --region $REGION
+
+# Add permission for public invocation
+echo "Adding public access permission..."
+aws lambda add-permission \
+    --function-name $STORE_LAMBDA_NAME \
+    --statement-id FunctionURLAllowPublicAccess-StoreService \
+    --action lambda:InvokeFunctionUrl \
+    --principal "*" \
+    --function-url-auth-type NONE \
+    --region $REGION
+
+# Get the Function URL
+STORE_SERVICE_URL=$(aws lambda get-function-url-config \
+    --function-name $STORE_LAMBDA_NAME \
+    --region $REGION \
+    --query 'FunctionUrl' \
+    --output text)
+    
+echo "Store Service URL: $STORE_SERVICE_URL"
+export STORE_SERVICE_URL
 echo "  Using Role: $LAMBDA_EXECUTION_ROLE_ARN"
 echo "  DB Host: $QM_RDS_HOST" # For verification
 # Do not echo QM_RDS_PASSWORD
 
-aws lambda create-function --function-name $STORE_LAMBDA_NAME --runtime python3.9 --role $LAMBDA_EXECUTION_ROLE_ARN --handler lambda_function.lambda_handler --zip-file fileb://store_service.zip --environment "Variables={DB_HOST=$QM_RDS_HOST,DB_PORT=$QM_RDS_PORT,DB_NAME=$QM_RDS_DB_NAME,DB_USER=$QM_RDS_USER,DB_PASSWORD=$QM_RDS_PASSWORD}" --timeout 30 --memory-size 256 --region $REGION
-
 # After creation, allow some time for the function to be fully ready.
 # You can check its status in the AWS Lambda console.
-```
-
-**4. Create Lambda Function URL for `StoreServiceLambda`:**
-
-This makes the Lambda callable via HTTPS.
-
-```bash
-aws lambda create-function-url-config --function-name $STORE_LAMBDA_NAME --auth-type NONE --region $REGION
-
-# Add permission for public invocation (if not automatically handled by AuthType NONE)
-# This is often needed to make the URL actually callable.
-aws lambda add-permission --function-name $STORE_LAMBDA_NAME --statement-id FunctionURLAllowPublicAccess-StoreService --action lambda:InvokeFunctionUrl --principal '*' --function-url-auth-type NONE --region $REGION
-
-# Get and display the Function URL
-STORE_SERVICE_URL=$(aws lambda get-function-url-config --function-name $STORE_LAMBDA_NAME --region $REGION --query 'FunctionUrl' --output text)
-echo "StoreServiceLambda Function URL: $STORE_SERVICE_URL"
-
-# Export it for use by other Lambdas if needed later, or for testing
-export QM_STORE_SERVICE_URL=$STORE_SERVICE_URL
 ```
 
 ---
@@ -661,15 +723,28 @@ def validate_store_exists(store_id):
     headers = {'Content-Type': 'application/json'}
     validation_payload_dict = {
         'action': 'getStore',
-        'payload': {'store_id': store_id}
+        'store_id': int(store_id)  # Ensure we send an integer
     }
     
     try:
         print(f"Calling StoreServiceLambda at {STORE_SERVICE_URL} to validate store_id: {store_id}")
+        print(f"Sending payload: {validation_payload_dict}")
         response = requests.post(STORE_SERVICE_URL, headers=headers, json=validation_payload_dict, timeout=10)
+        print(f"Response status code: {response.status_code}")
+        print(f"Response text: {response.text}")
+        
         response.raise_for_status()
         response_data = response.json()
-        if response.status_code == 200 and isinstance(response_data, dict) and response_data.get('store_id') == store_id:
+        
+        # Convert both to integers for comparison
+        expected_store_id = int(store_id)
+        returned_store_id = response_data.get('store_id')
+        
+        print(f"Expected store_id: {expected_store_id} (type: {type(expected_store_id)})")
+        print(f"Returned store_id: {returned_store_id} (type: {type(returned_store_id)})")
+        
+        # Check if we got a successful response with the correct store_id
+        if response.status_code == 200 and isinstance(response_data, dict) and returned_store_id == expected_store_id:
             print(f"Store validation successful for store_id: {store_id}")
             return True
         else:
@@ -680,6 +755,9 @@ def validate_store_exists(store_id):
         return False
     except json.JSONDecodeError as e:
         print(f"Error decoding JSON response from StoreServiceLambda: {e}. Response text: {response.text if response else 'No response'}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error in store validation: {e}")
         return False
 
 def lambda_handler(event, context):
@@ -749,7 +827,7 @@ def lambda_handler(event, context):
                 response_body = {'error': f'Store with store_id {store_id} not found or validation failed.'}
             else:
                 cursor.execute(
-                    "INSERT INTO InventoryItems (store_id, item_name, quantity, price) VALUES (%s, %s, %s, %s) RETURNING item_id",
+                    "INSERT INTO inventoryitems (store_id, item_name, quantity, price) VALUES (%s, %s, %s, %s) RETURNING item_id",
                     (store_id, item_name, int(quantity), float(price))
                 )
                 item_id = cursor.fetchone()[0]
@@ -762,7 +840,7 @@ def lambda_handler(event, context):
                 status_code = 400
                 response_body = {'error': 'Missing store_id'}
             else:
-                cursor.execute("SELECT item_id, item_name, quantity, price FROM InventoryItems WHERE store_id = %s ORDER BY item_name", (store_id,))
+                cursor.execute("SELECT item_id, item_name, quantity, price FROM inventoryitems WHERE store_id = %s ORDER BY item_name", (store_id,))
                 items = cursor.fetchall()
                 response_body = [{'item_id': i[0], 'item_name': i[1], 'quantity': i[2], 'price': float(i[3])} for i in items]
         
@@ -773,7 +851,7 @@ def lambda_handler(event, context):
                 status_code = 400
                 response_body = {'error': 'Missing required fields: item_id, quantity'}
             else:
-                cursor.execute("UPDATE InventoryItems SET quantity = %s WHERE item_id = %s RETURNING store_id", (int(new_quantity), item_id))
+                cursor.execute("UPDATE inventoryitems SET quantity = %s WHERE item_id = %s RETURNING store_id", (int(new_quantity), item_id))
                 if cursor.rowcount == 0:
                     status_code = 404
                     response_body = {'error': 'Item not found'}
@@ -822,7 +900,7 @@ cd .. # Return to the main lambda-microservices directory
 - Similar DB setup to `StoreServiceLambda`.
 - Takes `STORE_SERVICE_URL` from environment variables.
 - **`validate_store_exists(store_id)` function:** Makes a POST request to `StoreServiceLambda` to check if a store exists before adding inventory.
-- Handles actions: `addItemToStore` (calls `validate_store_exists`), `getStoreInventory`, `updateItemQuantity`.
+- Handles actions: `addItemToStore`, `getStoreInventory`, `updateItemQuantity`.
 - Error handling includes `requests.exceptions.RequestException` for the inter-service call.
 
 **2. Package the Lambda Function with Dependencies (`psycopg2-binary` and `requests`):**
@@ -831,7 +909,7 @@ cd .. # Return to the main lambda-microservices directory
 # Ensure you are in the directory containing inventory_service_pkg, e.g., lambda-microservices/
 
 # Install dependencies into the package directory
-python3.9 -m pip install psycopg2-binary requests -t ./inventory_service_pkg/
+python3.9 -m pip install psycopg2-binary requests -t ./inventory_service_pkg/ --no-cache-dir
 
 # Create the zip file
 cd inventory_service_pkg
@@ -926,15 +1004,28 @@ def validate_store_exists(store_id):
     headers = {'Content-Type': 'application/json'}
     validation_payload_dict = {
         'action': 'getStore',
-        'payload': {'store_id': store_id}
+        'store_id': int(store_id)  # Ensure we send an integer
     }
     
     try:
         print(f"Calling StoreServiceLambda at {STORE_SERVICE_URL} to validate store_id: {store_id}")
+        print(f"Sending payload: {validation_payload_dict}")
         response = requests.post(STORE_SERVICE_URL, headers=headers, json=validation_payload_dict, timeout=10)
+        print(f"Response status code: {response.status_code}")
+        print(f"Response text: {response.text}")
+        
         response.raise_for_status()
         response_data = response.json()
-        if response.status_code == 200 and isinstance(response_data, dict) and response_data.get('store_id') == store_id:
+        
+        # Convert both to integers for comparison
+        expected_store_id = int(store_id)
+        returned_store_id = response_data.get('store_id')
+        
+        print(f"Expected store_id: {expected_store_id} (type: {type(expected_store_id)})")
+        print(f"Returned store_id: {returned_store_id} (type: {type(returned_store_id)})")
+        
+        # Check if we got a successful response with the correct store_id
+        if response.status_code == 200 and isinstance(response_data, dict) and returned_store_id == expected_store_id:
             print(f"Store validation successful for store_id: {store_id}")
             return True
         else:
@@ -945,6 +1036,9 @@ def validate_store_exists(store_id):
         return False
     except json.JSONDecodeError as e:
         print(f"Error decoding JSON response from StoreServiceLambda: {e}. Response text: {response.text if response else 'No response'}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error in store validation: {e}")
         return False
 
 def lambda_handler(event, context):
@@ -1013,7 +1107,7 @@ def lambda_handler(event, context):
                 response_body = {'error': f'Store with store_id {store_id} not found or validation failed.'}
             else:
                 cursor.execute(
-                    """INSERT INTO GasPrices (store_id, fuel_type, price, last_updated)
+                    """INSERT INTO gasprices (store_id, fuel_type, price, last_updated)
                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                        ON CONFLICT (store_id, fuel_type)
                        DO UPDATE SET price = EXCLUDED.price, last_updated = CURRENT_TIMESTAMP
@@ -1038,7 +1132,7 @@ def lambda_handler(event, context):
                 response_body = {'error': 'Missing store_id'}
             else:
                 cursor.execute(
-                    "SELECT gas_price_id, fuel_type, price, last_updated FROM GasPrices WHERE store_id = %s ORDER BY fuel_type",
+                    "SELECT gas_price_id, fuel_type, price, last_updated FROM gasprices WHERE store_id = %s ORDER BY fuel_type",
                     (store_id,)
                 )
                 prices = cursor.fetchall()
@@ -1101,7 +1195,7 @@ cd .. # Return to the main lambda-microservices directory
 # Ensure you are in the directory containing gasprice_service_pkg, e.g., lambda-microservices/
 
 # Install dependencies into the package directory
-python3.9 -m pip install psycopg2-binary requests -t ./gasprice_service_pkg/
+python3.9 -m pip install psycopg2-binary requests -t ./gasprice_service_pkg/ --no-cache-dir
 
 # Create the zip file
 cd gasprice_service_pkg
@@ -1160,22 +1254,34 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       # Ensure QM_STORE_SERVICE_URL is set
       echo "Store Service URL: $QM_STORE_SERVICE_URL"
 
-      curl -X POST $QM_STORE_SERVICE_URL \
+      # Create store and capture the response
+      STORE_RESPONSE=$(curl -s -X POST $QM_STORE_SERVICE_URL \
         -H "Content-Type: application/json" \
         -d '{
               "action": "addStore",
-              "payload": {
+              "store": {
                   "name": "QuickMart Central",
                   "address": "123 Main St",
                   "city": "Anytown"
               }
-            }'
-      # Expected: JSON response with "Store added successfully" and a store_id
-      ```
-      **Note down the `store_id` from the response. We'll use it in subsequent tests. Let's assume it's `1` for the examples below. Export it for convenience:**
-      ```bash
-      export TEST_STORE_ID=1 # Replace 1 with the actual store_id you received
-      echo "Using TEST_STORE_ID: $TEST_STORE_ID"
+            }')
+      
+      echo "Store creation response: $STORE_RESPONSE"
+      
+      # Try to extract store_id from response (requires jq)
+      if command -v jq &> /dev/null; then
+          TEST_STORE_ID=$(echo "$STORE_RESPONSE" | jq -r '.store_id // empty')
+          if [ -n "$TEST_STORE_ID" ] && [ "$TEST_STORE_ID" != "null" ]; then
+              echo "Automatically extracted TEST_STORE_ID: $TEST_STORE_ID"
+              export TEST_STORE_ID
+          else
+              echo "Could not extract store_id automatically. Please set manually:"
+              echo "export TEST_STORE_ID=<store_id_from_response>"
+          fi
+      else
+          echo "jq not available. Please manually extract store_id from response above and run:"
+          echo "export TEST_STORE_ID=<store_id_from_response>"
+      fi
       ```
 
    b. **Get Store Details:**
@@ -1183,12 +1289,10 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       ```bash
       curl -X POST $QM_STORE_SERVICE_URL \
         -H "Content-Type: application/json" \
-        -d '{
-              "action": "getStore",
-              "payload": {
-                  "store_id": '$TEST_STORE_ID'
-              }
-            }'
+        -d "{
+              \"action\": \"getStore\",
+              \"store_id\": $TEST_STORE_ID
+            }"
       # Expected: JSON response with the details of "QuickMart Central"
       ```
 
@@ -1198,8 +1302,7 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       curl -X POST $QM_STORE_SERVICE_URL \
         -H "Content-Type: application/json" \
         -d '{
-              "action": "listStores",
-              "payload": {}
+              "action": "listStores"
             }'
       # Expected: JSON array containing "QuickMart Central" and any other stores
       ```
@@ -1212,35 +1315,41 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       # Ensure QM_INVENTORY_SERVICE_URL and TEST_STORE_ID are set
       echo "Inventory Service URL: $QM_INVENTORY_SERVICE_URL"
       echo "Using Store ID: $TEST_STORE_ID"
+      
+      # Check if TEST_STORE_ID is set
+      if [ -z "$TEST_STORE_ID" ]; then
+          echo "ERROR: TEST_STORE_ID is not set. Please run the store creation test first."
+          echo "Or manually set: export TEST_STORE_ID=<your_store_id>"
+          exit 1
+      fi
 
       curl -X POST $QM_INVENTORY_SERVICE_URL \
         -H "Content-Type: application/json" \
-        -d '{
-              "action": "addItemToStore",
-              "payload": {
-                  "store_id": '$TEST_STORE_ID',
-                  "item_name": "Premium Coffee Beans",
-                  "quantity": 50,
-                  "price": 12.99
+        -d "{
+              \"action\": \"addItemToStore\",
+              \"payload\": {
+                  \"store_id\": $TEST_STORE_ID,
+                  \"item_name\": \"Premium Coffee Beans\",
+                  \"quantity\": 50,
+                  \"price\": 12.99
               }
-            }'
+            }"
       # Expected: JSON response with "Item added to store successfully" and an item_id
       ```
-      **Note down the `item_id` (e.g., `export TEST_ITEM_ID=1`).**
 
    b. **Add Another Item:**
       ```bash
       curl -X POST $QM_INVENTORY_SERVICE_URL \
         -H "Content-Type: application/json" \
-        -d '{
-              "action": "addItemToStore",
-              "payload": {
-                  "store_id": '$TEST_STORE_ID',
-                  "item_name": "Bottled Water 1L",
-                  "quantity": 100,
-                  "price": 1.50
+        -d "{
+              \"action\": \"addItemToStore\",
+              \"payload\": {
+                  \"store_id\": $TEST_STORE_ID,
+                  \"item_name\": \"Bottled Water 1L\",
+                  \"quantity\": 100,
+                  \"price\": 1.50
               }
-            }'
+            }"
       ```
 
    c. **Get Store Inventory:**
@@ -1248,27 +1357,35 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       ```bash
       curl -X POST $QM_INVENTORY_SERVICE_URL \
         -H "Content-Type: application/json" \
-        -d '{
-              "action": "getStoreInventory",
-              "payload": {
-                  "store_id": '$TEST_STORE_ID'
+        -d "{
+              \"action\": \"getStoreInventory\",
+              \"payload\": {
+                  \"store_id\": $TEST_STORE_ID
               }
-            }'
+            }"
       # Expected: JSON array with "Premium Coffee Beans" and "Bottled Water 1L"
       ```
 
-   d. **Update Item Quantity (assuming TEST_ITEM_ID was set from 2.a):**
+   d. **Update Item Quantity:**
       ```bash
-      # export TEST_ITEM_ID=1 # Or whatever item_id you want to update
-      curl -X POST $QM_INVENTORY_SERVICE_URL \
-        -H "Content-Type: application/json" \
-        -d '{
-              "action": "updateItemQuantity",
-              "payload": {
-                  "item_id": '$TEST_ITEM_ID',
-                  "quantity": 45
-              }
-            }'
+      # First, you'll need to set TEST_ITEM_ID from a previous response, or manually set it:
+      # export TEST_ITEM_ID=1 # Replace with actual item_id
+      echo "Using TEST_ITEM_ID: $TEST_ITEM_ID"
+      
+      if [ -z "$TEST_ITEM_ID" ]; then
+          echo "ERROR: TEST_ITEM_ID is not set. Please get item_id from inventory list or item creation."
+          echo "Or manually set: export TEST_ITEM_ID=<your_item_id>"
+      else
+          curl -X POST $QM_INVENTORY_SERVICE_URL \
+            -H "Content-Type: application/json" \
+            -d "{
+                  \"action\": \"updateItemQuantity\",
+                  \"payload\": {
+                      \"item_id\": $TEST_ITEM_ID,
+                      \"quantity\": 45
+                  }
+                }"
+      fi
       # Expected: JSON response with "Item quantity updated successfully"
       ```
 
@@ -1280,17 +1397,23 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       # Ensure QM_GASPRICE_SERVICE_URL and TEST_STORE_ID are set
       echo "Gas Price Service URL: $QM_GASPRICE_SERVICE_URL"
       echo "Using Store ID: $TEST_STORE_ID"
+      
+      # Check if TEST_STORE_ID is set
+      if [ -z "$TEST_STORE_ID" ]; then
+          echo "ERROR: TEST_STORE_ID is not set. Please run the store creation test first."
+          exit 1
+      fi
 
       curl -X POST $QM_GASPRICE_SERVICE_URL \
         -H "Content-Type: application/json" \
-        -d '{
-              "action": "updateGasPrice",
-              "payload": {
-                  "store_id": '$TEST_STORE_ID',
-                  "fuel_type": "Regular",
-                  "price": 3.799
+        -d "{
+              \"action\": \"updateGasPrice\",
+              \"payload\": {
+                  \"store_id\": $TEST_STORE_ID,
+                  \"fuel_type\": \"Regular\",
+                  \"price\": 3.799
               }
-            }'
+            }"
       # Expected: JSON response with "Gas price updated/added successfully"
       ```
 
@@ -1298,14 +1421,14 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       ```bash
       curl -X POST $QM_GASPRICE_SERVICE_URL \
         -H "Content-Type: application/json" \
-        -d '{
-              "action": "updateGasPrice",
-              "payload": {
-                  "store_id": '$TEST_STORE_ID',
-                  "fuel_type": "Premium",
-                  "price": 4.299
+        -d "{
+              \"action\": \"updateGasPrice\",
+              \"payload\": {
+                  \"store_id\": $TEST_STORE_ID,
+                  \"fuel_type\": \"Premium\",
+                  \"price\": 4.299
               }
-            }'
+            }"
       ```
 
    c. **Get Gas Prices for Store:**
@@ -1313,12 +1436,12 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
       ```bash
       curl -X POST $QM_GASPRICE_SERVICE_URL \
         -H "Content-Type: application/json" \
-        -d '{
-              "action": "getGasPricesForStore",
-              "payload": {
-                  "store_id": '$TEST_STORE_ID'
+        -d "{
+              \"action\": \"getGasPricesForStore\",
+              \"payload\": {
+                  \"store_id\": $TEST_STORE_ID
               }
-            }'
+            }"
       # Expected: JSON array with "Regular" and "Premium" gas prices for the store
       ```
 

@@ -1,0 +1,22 @@
+# AWS Configuration
+aws_region = "us-east-1"  # Change to your preferred region
+environment = "dev"       # Environment name (dev, staging, prod)
+
+# Database Configuration
+db_instance_class = "db.t3.micro"    # RDS instance type (Free Tier eligible)
+db_storage_size = 20                 # Storage size in GB
+db_engine_version = "15.7"           # PostgreSQL version
+db_name = "quickmartdb"              # Database name
+db_username = "quickmartadmin"       # Database admin username
+
+# Tags (optional but recommended)
+default_tags = {
+  Project     = "QuickMart"
+  Environment = "dev"
+  Owner       = "your-name"
+  ManagedBy   = "Terraform"
+  Purpose     = "Lambda Microservices Demo"
+}
+
+# Note: Database password is automatically generated and stored in SSM Parameter Store
+# You don't need to specify it here for security reasons 

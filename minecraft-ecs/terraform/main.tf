@@ -175,7 +175,7 @@ resource "aws_ecs_task_definition" "minecraft_server" {
         },
         {
           name  = "VERSION"
-          value = "1.20.4"
+          value = "1.21.4"
         },
         {
           name  = "ENABLE_COMMAND_BLOCK"
@@ -198,12 +198,16 @@ resource "aws_ecs_task_definition" "minecraft_server" {
           value = "https://github.com/servertap-io/servertap/releases/download/v0.6.1/servertap-0.6.1.jar"
         },
         {
-          name  = "SERVER_TAP_ENABLED"
+          name  = "COPY_CONFIG_DEST"
+          value = "/data"
+        },
+        {
+          name  = "REPLACE_ENV_IN_PLACE"
           value = "true"
         },
         {
-          name  = "SERVER_TAP_PORT"
-          value = "4567"
+          name  = "CFG_SERVERTAP_CONFIG_YML"
+          value = "port: 4567\nuseKeyAuth: false\ncorsOrigins:\n  - \"*\"\nwebsocketConsoleBuffer: 1000\ndisable-swagger: false\nblockedPaths: []"
         }
       ]
       logConfiguration = {
@@ -252,26 +256,72 @@ data "aws_ecs_task_definition" "current" {
 resource "null_resource" "get_public_ip" {
   provisioner "local-exec" {
     command = <<EOT
-      echo "Fetching public IP of the Minecraft server..."
-      IP=$(aws ecs describe-tasks \
-        --cluster ${aws_ecs_cluster.minecraft_cluster.arn} \
-        --tasks $(aws ecs list-tasks \
-          --cluster ${aws_ecs_cluster.minecraft_cluster.arn} \
+      echo "Waiting for ECS service to start and fetching public IP..."
+      
+      # Wait for the service to have running tasks
+      max_attempts=30
+      attempt=0
+      
+      while [ $attempt -lt $max_attempts ]; do
+        echo "Attempt $((attempt + 1))/$max_attempts: Checking for running tasks..."
+        
+        # List tasks for the service
+        TASK_ARN=$(aws ecs list-tasks \
+          --cluster ${aws_ecs_cluster.minecraft_cluster.name} \
           --service-name ${aws_ecs_service.minecraft_service.name} \
+          --desired-status RUNNING \
           --output text \
-          --query 'taskArns[0]') \
-        --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' \
-        --output text | \
-        xargs -I {} aws ec2 describe-network-interfaces \
-          --network-interface-ids {} \
-          --query 'NetworkInterfaces[0].Association.PublicIp' \
-          --output text 2>/dev/null || echo "IP_NOT_AVAILABLE")
-      echo "public_ip=$IP" > public_ip.txt
+          --query 'taskArns[0]' 2>/dev/null)
+        
+        if [ "$TASK_ARN" != "None" ] && [ "$TASK_ARN" != "" ]; then
+          echo "Found running task: $TASK_ARN"
+          
+          # Get the network interface ID
+          ENI_ID=$(aws ecs describe-tasks \
+            --cluster ${aws_ecs_cluster.minecraft_cluster.name} \
+            --tasks "$TASK_ARN" \
+            --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' \
+            --output text 2>/dev/null)
+          
+          if [ "$ENI_ID" != "None" ] && [ "$ENI_ID" != "" ]; then
+            echo "Found network interface: $ENI_ID"
+            
+            # Get the public IP
+            PUBLIC_IP=$(aws ec2 describe-network-interfaces \
+              --network-interface-ids "$ENI_ID" \
+              --query 'NetworkInterfaces[0].Association.PublicIp' \
+              --output text 2>/dev/null)
+            
+            if [ "$PUBLIC_IP" != "None" ] && [ "$PUBLIC_IP" != "" ]; then
+              echo "Found public IP: $PUBLIC_IP"
+              echo "public_ip=$PUBLIC_IP" > public_ip.txt
+              exit 0
+            else
+              echo "No public IP found yet, waiting..."
+            fi
+          else
+            echo "No network interface found yet, waiting..."
+          fi
+        else
+          echo "No running tasks found, waiting..."
+        fi
+        
+        attempt=$((attempt + 1))
+        sleep 10
+      done
+      
+      echo "Failed to get public IP after $max_attempts attempts"
+      echo "public_ip=IP_NOT_AVAILABLE" > public_ip.txt
     EOT
     interpreter = ["bash", "-c"]
   }
 
   depends_on = [aws_ecs_service.minecraft_service]
+  
+  # Re-run this when the service changes
+  triggers = {
+    service_arn = aws_ecs_service.minecraft_service.id
+  }
 }
 
 # Read the public IP from the file
