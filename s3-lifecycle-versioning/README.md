@@ -193,6 +193,7 @@ VERSION_1=$(echo $VERSIONS | jq -r '.[] | select(.IsLatest == false) | .VersionI
 echo "Version 1 ID: $VERSION_1"
 echo "Version 2 ID: $VERSION_2"
 echo "Version 3 ID: $VERSION_3 (Latest)"
+```
 
 #### Retrieve specific versions of the object:
 
@@ -228,6 +229,7 @@ echo -e "\nContents of version 2:"
 cat test-file-v2.txt
 echo -e "\nContents of version 3 (latest):"
 cat test-file-v3.txt
+```
 
 #### Delete a specific version of an object:
 
@@ -300,21 +302,21 @@ aws s3api list-object-versions \
     --output json > versions.json
 
 # Use a script to extract version IDs and delete all objects
-python -c '
+python3 -c '
 import json
+import os
+
 with open("versions.json", "r") as f:
     data = json.load(f)
-    
+
 for version in data.get("Versions", []):
-    print(f"Deleting {version["Key"]} version {version["VersionId"]}...")
-    cmd = f"aws s3api delete-object --bucket $BUCKET_NAME --key {version["Key"]} --version-id {version["VersionId"]}"
-    import os
+    print(f"Deleting {version[\"Key\"]} version {version[\"VersionId\"]}...")
+    cmd = f"aws s3api delete-object --bucket '"$BUCKET_NAME"' --key {version[\"Key\"]} --version-id {version[\"VersionId\"]}"
     os.system(cmd)
 
 for marker in data.get("DeleteMarkers", []):
-    print(f"Deleting marker for {marker["Key"]} version {marker["VersionId"]}...")
-    cmd = f"aws s3api delete-object --bucket $BUCKET_NAME --key {marker["Key"]} --version-id {marker["VersionId"]}"
-    import os
+    print(f"Deleting marker for {marker[\"Key\"]} version {marker[\"VersionId\"]}...")
+    cmd = f"aws s3api delete-object --bucket '"$BUCKET_NAME"' --key {marker[\"Key\"]} --version-id {marker[\"VersionId\"]}"
     os.system(cmd)
 '
 ```
