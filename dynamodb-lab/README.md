@@ -2,6 +2,9 @@
 
 This lab will guide you through using AWS DynamoDB with the AWS CLI in CloudShell. You'll learn how to create tables, insert data, query data, and perform basic operations.
 
+> **Warning**
+> As of October 2025, the AWS Sandbox environment blocks DynamoDB table creation. This tutorial is valid and accurate, but you will need to run it in a regular AWS account outside of the sandbox environment.
+
 ## Prerequisites
 
 - AWS account with access to CloudShell
@@ -37,10 +40,17 @@ aws dynamodb create-table \
     --billing-mode PAY_PER_REQUEST
 ```
 
-Verify the table is being created:
+Wait for the table to become active:
 
 ```bash
-aws dynamodb describe-table --table-name Students
+aws dynamodb wait table-exists --table-name Students
+echo "Table is now active!"
+```
+
+Verify the table status:
+
+```bash
+aws dynamodb describe-table --table-name Students --output table
 ```
 
 ## Step 3: Insert Data into the Table
@@ -58,7 +68,7 @@ aws dynamodb put-item \
         "Name": {"S": "John Smith"},
         "Email": {"S": "john.smith@example.com"},
         "Grade": {"N": "85"},
-        "Semester": {"S": "Fall2023"}
+        "Semester": {"S": "Fall2025"}
     }'
 ```
 
@@ -73,7 +83,7 @@ aws dynamodb put-item \
         "Name": {"S": "John Smith"},
         "Email": {"S": "john.smith@example.com"},
         "Grade": {"N": "92"},
-        "Semester": {"S": "Fall2023"}
+        "Semester": {"S": "Fall2025"}
     }'
 ```
 
@@ -86,7 +96,7 @@ aws dynamodb put-item \
         "Name": {"S": "Jane Doe"},
         "Email": {"S": "jane.doe@example.com"},
         "Grade": {"N": "91"},
-        "Semester": {"S": "Fall2023"}
+        "Semester": {"S": "Fall2025"}
     }'
 ```
 
@@ -99,7 +109,7 @@ aws dynamodb put-item \
         "Name": {"S": "Bob Johnson"},
         "Email": {"S": "bob.johnson@example.com"},
         "Grade": {"N": "78"},
-        "Semester": {"S": "Spring2024"}
+        "Semester": {"S": "Spring2026"}
     }'
 ```
 
@@ -112,7 +122,7 @@ aws dynamodb put-item \
         "Name": {"S": "Jane Doe"},
         "Email": {"S": "jane.doe@example.com"},
         "Grade": {"N": "88"},
-        "Semester": {"S": "Spring2024"}
+        "Semester": {"S": "Spring2026"}
     }'
 ```
 
@@ -121,7 +131,7 @@ aws dynamodb put-item \
 ### Scan the entire table:
 
 ```bash
-aws dynamodb scan --table-name Students
+aws dynamodb scan --table-name Students --output table
 ```
 
 **What happens during a scan operation?**
@@ -137,7 +147,8 @@ aws dynamodb scan --table-name Students
 aws dynamodb query \
     --table-name Students \
     --key-condition-expression "StudentID = :sid" \
-    --expression-attribute-values '{":sid": {"S": "S1001"}}'
+    --expression-attribute-values '{":sid": {"S": "S1001"}}' \
+    --output table
 ```
 
 **What happens during this query operation?**
@@ -156,7 +167,8 @@ aws dynamodb query \
     --expression-attribute-values '{
         ":sid": {"S": "S1001"},
         ":cid": {"S": "CS101"}
-    }'
+    }' \
+    --output table
 ```
 
 **What happens during this query operation?**
@@ -197,7 +209,7 @@ aws dynamodb delete-item \
 ### Verify the deletion:
 
 ```bash
-aws dynamodb scan --table-name Students
+aws dynamodb scan --table-name Students --output table
 ```
 
 ## Step 6: Filter Results with Scan
@@ -208,7 +220,8 @@ Let's find all students with grades above 85:
 aws dynamodb scan \
     --table-name Students \
     --filter-expression "Grade > :g" \
-    --expression-attribute-values '{":g": {"N": "85"}}'
+    --expression-attribute-values '{":g": {"N": "85"}}' \
+    --output table
 ```
 
 **What happens during a filtered scan operation?**
@@ -219,20 +232,21 @@ aws dynamodb scan \
 - This is less efficient than queries because filtering happens after reading all data
 - In this example, we'll get all students who scored above 85 in any course
 
-Find all students in the Fall 2023 semester:
+Find all students in the Fall 2025 semester:
 
 ```bash
 aws dynamodb scan \
     --table-name Students \
     --filter-expression "Semester = :sem" \
-    --expression-attribute-values '{":sem": {"S": "Fall2023"}}'
+    --expression-attribute-values '{":sem": {"S": "Fall2025"}}' \
+    --output table
 ```
 
 **What happens in this operation?**
 - Like the previous example, DynamoDB scans the entire table first
-- Then it filters to only return items where Semester = "Fall2023"
+- Then it filters to only return items where Semester = "Fall2025"
 - The operation reads all items but only returns matching ones
-- This will return all student enrollments from the Fall 2023 semester
+- This will return all student enrollments from the Fall 2025 semester
 - For large tables, using a Global Secondary Index would be more efficient if you frequently query by semester
 
 ## Step 7: Create a Secondary Index
@@ -256,6 +270,17 @@ aws dynamodb update-table \
     ]'
 ```
 
+Wait for the GSI to become active (this may take a minute):
+
+```bash
+# Check GSI status
+aws dynamodb describe-table --table-name Students \
+    --query 'Table.GlobalSecondaryIndexes[0].IndexStatus' \
+    --output text
+
+# Once it shows "ACTIVE", you can proceed
+```
+
 **What happens when creating a GSI?**
 - This operation adds a new access pattern to our table
 - DynamoDB will create a separate index with Email as the partition key
@@ -272,7 +297,8 @@ aws dynamodb query \
     --table-name Students \
     --index-name EmailIndex \
     --key-condition-expression "Email = :e" \
-    --expression-attribute-values '{":e": {"S": "jane.doe@example.com"}}'
+    --expression-attribute-values '{":e": {"S": "jane.doe@example.com"}}' \
+    --output table
 ```
 
 **What happens during a GSI query?**
@@ -308,10 +334,10 @@ The Students table uses a composite key structure:
 
 | StudentID | CourseID | Name        | Email                  | Grade | Semester    |
 |-----------|----------|-------------|------------------------|-------|-------------|
-| S1001     | CS101    | John Smith  | john.smith@example.com | 90    | Fall2023    |
-| S1001     | MATH201  | John Smith  | john.smith@example.com | 92    | Fall2023    |
-| S1002     | CS101    | Jane Doe    | jane.doe@example.com   | 91    | Fall2023    |
-| S1002     | PHYS101  | Jane Doe    | jane.doe@example.com   | 88    | Spring2024  |
+| S1001     | CS101    | John Smith  | john.smith@example.com | 90    | Fall2025    |
+| S1001     | MATH201  | John Smith  | john.smith@example.com | 92    | Fall2025    |
+| S1002     | CS101    | Jane Doe    | jane.doe@example.com   | 91    | Fall2025    |
+| S1002     | PHYS101  | Jane Doe    | jane.doe@example.com   | 88    | Spring2026  |
 
 ## Data Schema Diagram
 
@@ -323,13 +349,13 @@ Students Table
 | StudentID  | CourseID | Name     | Email                | Grade | Semester   |
 | (Partition)| (Sort)   |          |                      |       |            |
 +============+==========+==========+======================+=======+============+
-| S1001      | CS101    | John     | john.smith@example   | 90    | Fall2023   |
+| S1001      | CS101    | John     | john.smith@example   | 90    | Fall2025   |
 +------------+----------+----------+----------------------+-------+------------+
-| S1001      | MATH201  | John     | john.smith@example   | 92    | Fall2023   |
+| S1001      | MATH201  | John     | john.smith@example   | 92    | Fall2025   |
 +------------+----------+----------+----------------------+-------+------------+
-| S1002      | CS101    | Jane     | jane.doe@example     | 91    | Fall2023   |
+| S1002      | CS101    | Jane     | jane.doe@example     | 91    | Fall2025   |
 +------------+----------+----------+----------------------+-------+------------+
-| S1002      | PHYS101  | Jane     | jane.doe@example     | 88    | Spring2024 |
+| S1002      | PHYS101  | Jane     | jane.doe@example     | 88    | Spring2026 |
 +------------+----------+----------+----------------------+-------+------------+
 ```
 
@@ -376,7 +402,7 @@ Determine which course has the most students enrolled.
 </details>
 
 ### Challenge 3: Semester Transition
-Write a script to update all "Fall2023" semester entries to "Completed" status.
+Write a script to update all "Fall2025" semester entries to "Completed" status.
 
 <details>
   <summary>Need help? Click for solution script</summary>
