@@ -17,7 +17,12 @@ resource "null_resource" "pip_install" {
   provisioner "local-exec" {
     command = <<EOF
       if [ -f "${var.source_path}/requirements.txt" ]; then
-        pip install -r ${var.source_path}/requirements.txt -t ${var.source_path} --upgrade
+        # Clean up any existing dependencies
+        find ${var.source_path} -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
+        find ${var.source_path} -name "psycopg2*" -type d -exec rm -rf {} + 2>/dev/null || true
+        
+        # Install dependencies for Lambda
+        pip install -r ${var.source_path}/requirements.txt -t ${var.source_path} --upgrade --force-reinstall
       fi
 EOF
   }
@@ -36,6 +41,9 @@ resource "aws_lambda_function" "this" {
   # Use the packaged zip file
   filename         = data.archive_file.lambda_package.output_path
   source_code_hash = data.archive_file.lambda_package.output_base64sha256
+
+  # Lambda layers
+  layers = var.layers
 
   dynamic "environment" {
     for_each = length(keys(var.environment_variables)) > 0 ? [true] : []

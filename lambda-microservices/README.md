@@ -1369,7 +1369,7 @@ We will use `curl` to send POST requests with JSON payloads to these URLs.
    d. **Update Item Quantity:**
       ```bash
       # First, you'll need to set TEST_ITEM_ID from a previous response, or manually set it:
-      # export TEST_ITEM_ID=1 # Replace with actual item_id
+      export TEST_ITEM_ID=1 # Replace with actual item_id
       echo "Using TEST_ITEM_ID: $TEST_ITEM_ID"
       
       if [ -z "$TEST_ITEM_ID" ]; then

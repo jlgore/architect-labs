@@ -1,0 +1,265 @@
+AWS Academy Cloud Architecting 3 - Sandbox
+Lab Overview
+This is a sandbox environment for ad-hoc exploration of AWS services.
+
+You will be restricted to the following services and usage:
+
+AWS Cloud9
+
+Supported Instance types: nano, micro, and small
+
+Amazon CloudFormation
+
+Amazon CloudFront
+
+AWS CloudShell
+
+AWS CloudTrail
+
+Amazon CloudWatch
+
+Amazon DynamoDB
+
+Amazon Elastic Compute Cloud (EC2)
+
+Instance types - only the following instance types can be launched: t2.nano, t2.micro, t2.small, t2.medium, t3.nano, t3.micro, t3.small, t3.medium.
+
+EBS volumes - sizes up to 35 GB and type General Purpose SSD (gp2).
+
+On-Demand instances.
+
+AMIs - Amazon provided Linux and Windows AMIs.
+
+Instance quantity - You can launch up to 9 instances. Attempts to launch more instances will result in your lab account being suspended.
+
+Amazon EC2 Auto Scaling
+
+Elastic Load Balancing
+
+AWS Identity and Access Management (IAM)
+
+Read-only access
+
+AWS Key Management Service (KMS)
+
+List access
+
+AWS Lambda
+
+Amazon Relational Database Service (RDS)
+
+DB Instance Class Types - db.t3 instances of type db.t3.micro to db.t3.medium.
+
+EBS volumes - size up to 100 GB and type General Purpose SSD (gp2).
+
+On-Demand DB instance class types.
+
+DatabaseEngine - Amazon Aurora, MySQL, PostgreSQL and MariaDB.
+
+Multi-AZ deployments are not supported (choose Dev/Test or Free tier template if prompted and do not create a standby instance).
+
+Enhanced monitoring is not supported (you must uncheck this default setting).
+
+Amazon Route53
+
+You cannot register a domain
+
+Amazon Simple Storage Service (S3)
+
+Amazon S3 Glacier
+
+Amazon Simple Notification Service (SNS)
+
+AWS Systems Manager (SSM)
+
+Tagging
+
+ 
+
+Accessing the AWS Management Console
+At the top of these instructions, choose Start Lab to launch your lab.
+
+Tip: If you need more time to complete the lab, choose Start Lab again to restart the timer for the environment.
+
+The following information indicates the lab status:
+
+A red circle next to AWS  at the upper-left corner of this page indicates that the lab has not been started.
+
+A yellow circle next to AWS  at the upper-left corner of this page indicates that the lab is starting.
+
+A green circle next to AWS  at the upper-left corner of this page indicates that the lab is ready.
+
+Wait for the lab to be ready before proceeding.
+
+At the top of these instructions, choose the green circle next to AWS .
+
+This option opens the AWS Management Console in a new browser tab. The system automatically signs you in.
+
+Tip: If a new browser tab does not open, a banner or icon at the top of your browser will indicate that your browser is preventing the site from opening pop-up windows. Choose the banner or icon, and choose Allow pop-ups.
+
+Arrange the AWS Management Console tab so that it displays along side these instructions. Ideally, you should be able to see both browser tabs at the same time so that you can follow the lab steps.
+
+ Do not change the lab Region unless specifically instructed to do so.
+
+ 
+
+Using the Terminal in the browser
+A terminal window displays to the right of these instructions.
+
+You can toggle the visibility of the terminal window by selecting or deselecting the checkbox in the Terminal box at the top of the screen.
+
+The terminal in the browser provides access to a Linux shell on a server that exists outside of the AWS account that you use when your lab is running.
+
+ 
+
+Running AWS CLI commands
+After you start the lab, the terminal will be pre-configured with the credentials necessary to using the AWS Command Line Interface (AWS CLI).
+
+For example, run the following command to see the account number and your user ID:
+
+aws sts get-caller-identity
+If you have any EC2 instances running in the sandbox, running this command would provide information about them:
+
+aws ec2 describe-instances
+See the AWS CLI Command Reference documentation for details on how to use the AWS CLI.
+
+ 
+
+Using the AWS SDK for Python
+The terminal also has Python 3 installed with the boto 3 library available. You can use it to run AWS Python SDK code. For example:
+
+$ python3
+>>> import boto3
+>>> ec2 = boto3.client('ec2', region_name='us-east-1')  
+>>> ec2.describe_regions()
+>>> exit()
+$
+See the documentation for details on how to use the AWS SDK for Python.
+
+How to Access EC2 Instance(s)
+When launching EC2 instances in the sandbox environment, choose the option to use the existing key pair named vockey at the time of launch.  Then:
+
+Click on the Details drop down menu above these instructions you are currently reading
+
+Click Show. A Credentials window will open.
+
+To connect to a Linux instance from a Windows desktop or laptop, or to connect via SSH to a Windows instance from a Windows desktop or laptop, click on the Download PPK button and save the labsuser.ppk file.
+
+To connect to a Windows instance desktop from any desktop or laptop, or to connect to a Linux instance via SSH from a Mac, click on the Download PEM button and save the labsuser.pem file.
+
+Typically your browser will save the labsuser.pem or the labsuser.ppk file to your Downloads directory.
+
+Exit the Details panel by clicking on the X.
+
+To connect to the Desktop of a Windows instance:
+
+In the EC2 Console, click on Instances and choose the instance you want to connect to
+
+From the Actions menu choose Get Windows Password
+
+Next to Key Pair Path click Browse.
+
+Browse to and select the labsuser.pem file you downloaded earlier.
+
+Click Decrypt Password.
+
+The connection information will now display, including the instance's Public DNS, Administrator user name, and the decrypted password.
+
+Use a Remote Desktop Protocol (RDP) client to connect to the desktop of the EC2 instance using these connection details.
+
+To connect using SSH to a Linux instance, see the next section.
+
+  
+
+SSH Access to any EC2 Instance(s) you launch
+The steps below describe how to use the SSH key to connect to your instance.
+
+ Windows Users: Using SSH to Connect
+ These instructions are for Windows users only.
+
+If you are using macOS or Linux, skip to the next section.
+
+Download needed software.
+
+You will use PuTTY to SSH to Amazon EC2 instances. If you do not have PuTTY installed on your computer, download it here.
+
+Open putty.exe
+
+Configure PuTTY to not timeout:
+
+Click Connection
+
+Set Seconds between keepalives to 30
+
+This allows you to keep the PuTTY session open for a longer period of time.
+
+Configure your PuTTY session:
+
+Click Session
+
+Host Name (or IP address): Copy and paste the IPv4 Public IP address for the instance. To find it, return to the EC2 Console and click on Instances. Check the box next to the instance and in the Description tab copy the IPv4 Public IP value.
+
+Back in PuTTy, in the Connection list, expand  SSH
+
+Choose Auth and expand  Credentials
+
+Under Private key file for authentication: Choose Browse
+
+Browse to and select the labsuser.ppk file that you downloaded
+
+To select the file, choose Open
+
+Choose Open again
+
+To trust and connect to the host, choose Accept.
+
+When prompted login as, enter: ec2-user
+
+This will connect you to the EC2 instance.
+
+Windows Users: Click here to skip ahead to the next task.
+
+ 
+
+macOS  and Linux  Users - Using SSH to Connect
+These instructions are for Mac/Linux users only.
+
+Read through the three bullet points in this step before you start to complete the actions, because you will not be able see these instructions when the Details panel is open.
+
+Click on the Details drop down menu above these instructions you are currently reading, and then click Show. A Credentials window will open.
+
+Click on the Download PEM button and save the labsuser.pem file. Typically your browser will save it to the Downloads directory.
+
+Then exit the Details panel by clicking on the X.
+
+Open a terminal window, and change directory cd to the directory where the .pem file was downloaded.
+
+For example, run this command, if it was saved to your Downloads directory:
+
+cd ~/Downloads
+Change the permissions on the key to be read only, by running this command:
+
+chmod 400 <filename>.pem
+Return to the AWS Management Console, and in the EC2 service, click on Instances.
+
+Check the box next to the instance you want to connect to.
+
+In the Description tab, copy the IPv4 Public IP value.
+
+Return to the terminal window and run this command (replace <public-ip> with the actual public IP address you copied):
+
+ssh -i <filename>.pem ec2-user@<public-ip>
+Type yes when prompted to allow a first connection to this remote SSH server.
+
+Because you are using a key pair for authentication, you will not be prompted for a password.
+
+ 
+
+Lab end
+ 
+
+At the top of this page, choose End Lab and then choose Yes to confirm that you want to end the lab. 
+
+The message "Ended AWS Lab Successfully" is briefly displayed, indicating that the lab has ended.
+
+©2023 Amazon Web Services, Inc. and its affiliates. All rights reserved. This work may not be reproduced or redistributed, in whole or in part, without prior written permission from Amazon Web Services, Inc. Commercial copying, lending, or selling is prohibited.

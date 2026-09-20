@@ -16,12 +16,72 @@ def get_db_connection():
             port=DB_PORT,
             dbname=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD
+            password=DB_PASSWORD,
+            sslmode='require'
         )
         return conn
     except Exception as e:
         print(f"Database connection failed: {e}")
         raise e  # Re-raise exception to signal error
+
+def initialize_database():
+    """Create database tables if they don't exist"""
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            # Create stores table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS stores (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    address VARCHAR(500) NOT NULL,
+                    city VARCHAR(100) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create inventory table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS inventory (
+                    id SERIAL PRIMARY KEY,
+                    store_id INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+                    item_name VARCHAR(255) NOT NULL,
+                    quantity INTEGER NOT NULL DEFAULT 0,
+                    price DECIMAL(10,2) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(store_id, item_name)
+                )
+            """)
+            
+            # Create gas_prices table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gas_prices (
+                    id SERIAL PRIMARY KEY,
+                    store_id INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+                    fuel_type VARCHAR(50) NOT NULL,
+                    price DECIMAL(10,3) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(store_id, fuel_type)
+                )
+            """)
+            
+            # Create indexes
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_inventory_store_id ON inventory(store_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_gas_prices_store_id ON gas_prices(store_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_stores_name ON stores(name)")
+            
+            conn.commit()
+            print("Database tables initialized successfully")
+        conn.close()
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+        # Don't raise the error - we want the Lambda to continue working even if table creation fails
+
+# Initialize database tables on Lambda startup
+initialize_database()
 
 def lambda_handler(event, context):
     # For Lambda Function URL, the actual request body is in event['body'] as a JSON string
@@ -59,14 +119,14 @@ def lambda_handler(event, context):
             conn = get_db_connection()
             try:
                 with conn.cursor() as cur:
-                    # Insert new store
+                    # Insert new store (updated to match table schema)
                     cur.execute(
                         """
-                        INSERT INTO stores (name, address)
-                        VALUES (%s, %s)
-                        RETURNING store_id, name, address, created_at
+                        INSERT INTO stores (name, address, city)
+                        VALUES (%s, %s, %s)
+                        RETURNING id, name, address, city, created_at
                         """,
-                        (store_data['name'], store_data['address'])
+                        (store_data['name'], store_data['address'], store_data.get('city', ''))
                     )
                     result = cur.fetchone()
                     conn.commit()
@@ -78,7 +138,8 @@ def lambda_handler(event, context):
                             'store_id': result[0],
                             'name': result[1],
                             'address': result[2],
-                            'created_at': result[3].isoformat()
+                            'city': result[3],
+                            'created_at': result[4].isoformat()
                         }),
                         'headers': {'Content-Type': 'application/json'}
                     }
@@ -99,9 +160,9 @@ def lambda_handler(event, context):
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT store_id, name, address, created_at
+                        SELECT id, name, address, city, created_at
                         FROM stores
-                        WHERE store_id = %s
+                        WHERE id = %s
                         """,
                         (store_id,)
                     )
@@ -120,7 +181,8 @@ def lambda_handler(event, context):
                             'store_id': result[0],
                             'name': result[1],
                             'address': result[2],
-                            'created_at': result[3].isoformat()
+                            'city': result[3],
+                            'created_at': result[4].isoformat()
                         }),
                         'headers': {'Content-Type': 'application/json'}
                     }
@@ -133,7 +195,7 @@ def lambda_handler(event, context):
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT store_id, name, address, created_at
+                        SELECT id, name, address, city, created_at
                         FROM stores
                         ORDER BY name
                         """
@@ -144,7 +206,8 @@ def lambda_handler(event, context):
                             'store_id': row[0],
                             'name': row[1],
                             'address': row[2],
-                            'created_at': row[3].isoformat()
+                            'city': row[3],
+                            'created_at': row[4].isoformat()
                         })
                     
                     return {

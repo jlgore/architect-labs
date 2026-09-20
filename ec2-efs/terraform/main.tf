@@ -223,6 +223,9 @@ resource "aws_instance" "efs_client" {
     echo "${aws_efs_file_system.main.id}:/ /mnt/efs efs defaults,_netdev 0 0" >> /etc/fstab
     mount -t efs ${aws_efs_file_system.main.id}:/ /mnt/efs
 
+    # Change ownership of EFS mount point to ec2-user
+    chown ec2-user:ec2-user /mnt/efs
+
     # Create a test file in EFS
     echo "This is a test file created on $(date)" > /mnt/efs/test-$(hostname).txt
 

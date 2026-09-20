@@ -47,3 +47,54 @@ output "ssh_command" {
   description = "SSH command to connect to the EC2 instance"
   value       = "ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip}"
 }
+
+output "efs_write_test_command" {
+  description = "Command to write a test file to EFS via SSH"
+  value       = "ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'echo \"Test data from $(hostname) at $(date)\" > /mnt/efs/test-file.txt'"
+}
+
+output "efs_read_test_command" {
+  description = "Command to read files from EFS via SSH"
+  value       = "ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'cat /mnt/efs/test-file.txt'"
+}
+
+output "efs_list_command" {
+  description = "Command to list all files in EFS via SSH"
+  value       = "ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'ls -lah /mnt/efs'"
+}
+
+output "efs_mount_verification" {
+  description = "Command to verify EFS is mounted"
+  value       = "ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'df -h | grep efs'"
+}
+
+output "demo_instructions" {
+  description = "Quick demo instructions"
+  value       = <<-EOT
+
+    === EC2 + EFS Lab Demo Instructions ===
+
+    1. Connect to EC2:
+       ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip}
+
+    2. Verify EFS is mounted:
+       ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'df -h | grep efs'
+
+    3. List files in EFS:
+       ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'ls -lah /mnt/efs'
+
+    4. Write to EFS:
+       ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'echo "Test data from $(hostname) at $(date)" > /mnt/efs/test-file.txt'
+
+    5. Read from EFS:
+       ssh -i ~/.ssh/id_rsa ec2-user@${aws_instance.efs_client.public_ip} 'cat /mnt/efs/test-file.txt'
+
+    6. Once connected via SSH, you can also run:
+       - echo "Hello EFS" > /mnt/efs/myfile.txt
+       - cat /mnt/efs/myfile.txt
+       - ls -la /mnt/efs/
+
+    EFS ID: ${aws_efs_file_system.main.id}
+
+  EOT
+}

@@ -190,6 +190,10 @@ resource "aws_ecs_task_definition" "minecraft_server" {
           value = "minecraft"  # Change this to a secure password in production
         },
         {
+          name  = "ONLINE_MODE"
+          value = "false"
+        },
+        {
           name  = "PLUGINS_SYNC_UPDATE"
           value = "true"
         },
@@ -208,6 +212,30 @@ resource "aws_ecs_task_definition" "minecraft_server" {
         {
           name  = "CFG_SERVERTAP_CONFIG_YML"
           value = "port: 4567\nuseKeyAuth: false\ncorsOrigins:\n  - \"*\"\nwebsocketConsoleBuffer: 1000\ndisable-swagger: false\nblockedPaths: []"
+        },
+        {
+          name  = "CONNECTION_THROTTLE"
+          value = "0"
+        },
+        {
+          name  = "MAX_PLAYERS"
+          value = "100"
+        },
+        {
+          name  = "NETWORK_COMPRESSION_THRESHOLD"
+          value = "-1"
+        },
+        {
+          name  = "CFG_BUKKIT_YML"
+          value = "settings:\n  connection-throttle: 0\n  timeout-time: 60\n  restart-on-crash: true\n  restart-script: ./start.sh"
+        },
+        {
+          name  = "CFG_SPIGOT_YML"
+          value = "settings:\n  timeout-time: 60\n  restart-on-crash: true\n  netty-threads: 4\n  attribute:\n    maxHealth:\n      max: 2048.0\n    movementSpeed:\n      max: 2048.0\n    attackDamage:\n      max: 2048.0"
+        },
+        {
+          name  = "CFG_SERVER_PROPERTIES"
+          value = "connection-throttle=0\nmax-players=100\nnetwork-compression-threshold=-1\nplayer-idle-timeout=0\nmax-world-size=29999984"
         }
       ]
       logConfiguration = {

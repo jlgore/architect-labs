@@ -18,7 +18,7 @@ variable "handler" {
 variable "runtime" {
   description = "Lambda function runtime"
   type        = string
-  default     = "python3.9"
+  default     = "python3.10"
 }
 
 variable "timeout" {
@@ -47,6 +47,12 @@ variable "environment_variables" {
   description = "Environment variables for the Lambda function"
   type        = map(string)
   default     = {}
+}
+
+variable "layers" {
+  description = "List of Lambda layer ARNs to attach to the function"
+  type        = list(string)
+  default     = []
 }
 
 variable "tags" {

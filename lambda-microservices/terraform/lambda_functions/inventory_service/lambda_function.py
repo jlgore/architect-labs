@@ -20,7 +20,8 @@ def get_db_connection():
             port=DB_PORT,
             dbname=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD
+            password=DB_PASSWORD,
+            sslmode='require'
         )
         return conn
     except Exception as e:
@@ -139,7 +140,7 @@ def lambda_handler(event, context):
                 response_body = {'error': f'Store with store_id {store_id} not found or validation failed.'}
             else:
                 cursor.execute(
-                    "INSERT INTO inventoryitems (store_id, item_name, quantity, price) VALUES (%s, %s, %s, %s) RETURNING item_id",
+                    "INSERT INTO inventory (store_id, item_name, quantity, price) VALUES (%s, %s, %s, %s) RETURNING id",
                     (store_id, item_name, int(quantity), float(price))
                 )
                 item_id = cursor.fetchone()[0]
@@ -152,7 +153,7 @@ def lambda_handler(event, context):
                 status_code = 400
                 response_body = {'error': 'Missing store_id'}
             else:
-                cursor.execute("SELECT item_id, item_name, quantity, price FROM inventoryitems WHERE store_id = %s ORDER BY item_name", (store_id,))
+                cursor.execute("SELECT id, item_name, quantity, price FROM inventory WHERE store_id = %s ORDER BY item_name", (store_id,))
                 items = cursor.fetchall()
                 response_body = [{'item_id': i[0], 'item_name': i[1], 'quantity': i[2], 'price': float(i[3])} for i in items]
         
@@ -163,7 +164,7 @@ def lambda_handler(event, context):
                 status_code = 400
                 response_body = {'error': 'Missing required fields: item_id, quantity'}
             else:
-                cursor.execute("UPDATE inventoryitems SET quantity = %s WHERE item_id = %s RETURNING store_id", (int(new_quantity), item_id))
+                cursor.execute("UPDATE inventory SET quantity = %s WHERE id = %s RETURNING store_id", (int(new_quantity), item_id))
                 if cursor.rowcount == 0:
                     status_code = 404
                     response_body = {'error': 'Item not found'}

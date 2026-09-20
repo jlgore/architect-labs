@@ -1,0 +1,34 @@
+{
+  "name": "minecraft-analytics-bots",
+  "version": "1.0.0",
+  "description": "Minecraft bots to generate analytics data for the data pipeline",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "bun run index.js",
+    "single-bot": "bun run single-bot.js",
+    "stress-test": "bun run stress-test.js",
+    "chat-bots": "bun run chat-bots.js",
+    "death-bots": "bun run death-bots.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.17.0",
+    "mineflayer-pathfinder": "^2.4.1",
+    "mineflayer-collectblock": "^1.3.0",
+    "mineflayer-pvp": "^1.3.1",
+    "prismarine-chat": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0"
+  },
+  "keywords": [
+    "minecraft",
+    "bot",
+    "analytics",
+    "data-pipeline",
+    "aws",
+    "prismarinejs"
+  ],
+  "author": "Data Pipeline Demo",
+  "license": "MIT"
+} 

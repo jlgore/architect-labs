@@ -21,7 +21,8 @@ def get_db_connection():
             port=DB_PORT,
             dbname=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD
+            password=DB_PASSWORD,
+            sslmode='require'
         )
         return conn
     except Exception as e:
@@ -139,22 +140,22 @@ def lambda_handler(event, context):
                 response_body = {'error': f'Store with store_id {store_id} not found or validation failed.'}
             else:
                 cursor.execute(
-                    """INSERT INTO gasprices (store_id, fuel_type, price, last_updated)
+                    """INSERT INTO gas_prices (store_id, fuel_type, price, updated_at)
                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                        ON CONFLICT (store_id, fuel_type)
-                       DO UPDATE SET price = EXCLUDED.price, last_updated = CURRENT_TIMESTAMP
-                       RETURNING gas_price_id, last_updated""",
-                    (store_id, fuel_type, Decimal(str(price)))
+                       DO UPDATE SET price = EXCLUDED.price, updated_at = CURRENT_TIMESTAMP
+                       RETURNING id, updated_at""",
+                    (store_id, fuel_type, float(price))
                 )
-                gas_price_id, last_updated_ts = cursor.fetchone()
+                gas_price_id, updated_ts = cursor.fetchone()
                 conn.commit()
                 response_body = {
                     'message': 'Gas price updated/added successfully',
                     'gas_price_id': gas_price_id,
                     'store_id': store_id,
                     'fuel_type': fuel_type,
-                    'price': str(Decimal(str(price))), 
-                    'last_updated': last_updated_ts.isoformat()
+                    'price': float(price),
+                    'updated_at': updated_ts.isoformat()
                 }
 
         elif action == 'getGasPricesForStore':
@@ -164,7 +165,7 @@ def lambda_handler(event, context):
                 response_body = {'error': 'Missing store_id'}
             else:
                 cursor.execute(
-                    "SELECT gas_price_id, fuel_type, price, last_updated FROM gasprices WHERE store_id = %s ORDER BY fuel_type",
+                    "SELECT id, fuel_type, price, updated_at FROM gas_prices WHERE store_id = %s ORDER BY fuel_type",
                     (store_id,)
                 )
                 prices = cursor.fetchall()
@@ -172,8 +173,8 @@ def lambda_handler(event, context):
                     {
                         'gas_price_id': p[0],
                         'fuel_type': p[1],
-                        'price': str(p[2]), 
-                        'last_updated': p[3].isoformat()
+                        'price': float(p[2]),
+                        'updated_at': p[3].isoformat()
                     } for p in prices
                 ]
         
